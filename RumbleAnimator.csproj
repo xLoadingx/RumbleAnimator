@@ -73,4 +73,8 @@
       <EmbeddedResource Include="AssetBundles\replaysettingsmeshes" />
     </ItemGroup>
 
+    <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+      <Exec Command="xcopy /Y /R &quot;$(TargetPath)&quot; &quot;E:\SteamLibrary\steamapps\common\RUMBLE\Mods\&quot;&#xA;" />
+    </Target>
+
 </Project>

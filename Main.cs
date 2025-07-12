@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using Il2CppPhoton.Pun;
 using MelonLoader;
 using UnityEngine;
 using Il2CppRUMBLE.MoveSystem;
@@ -56,12 +57,12 @@ namespace RumbleAnimator
 		
 		public static int currentRecordingFrame = 0;
 		
-		private GameObject bracelet;
+		private GameObject recordingRing;
 
 		private Mod rumbleAnimatorMod = new();
 		private ModSetting<float> SlabDistance = new();
 		private ModSetting<float> HeightOffset = new();
-		private ModSetting<bool> BraceletHand = new();
+		private ModSetting<bool> RecordingRingHand = new();
 
 		public static Assembly ModAssembly;
 
@@ -82,8 +83,12 @@ namespace RumbleAnimator
 			if (currentScene is not "Loader")
 				InitializeRecordingBracelet();
 			
+			SlabBuilder.mainSlabDestroy.Initialize();
+			
 			isRecording = false;
 			isPlaying = false;
+
+			MelonLogger.Msg($"PhotonNetwork NickName: {PhotonNetwork.MasterClient.NickName} | Player Username: {Calls.Players.GetLocalPlayer().Data.GeneralData.PublicUsername}");
 
 			players?.Clear();
 		}
@@ -128,11 +133,11 @@ namespace RumbleAnimator
 					MelonLogger.Msg("[RumbleAnimator] Recording");
 					players.Clear();
 					recordingStartTime = Time.time;
-
 					ReplayFile.InitializeReplayFile();
 				}
 				else
 				{
+					
 					ReplayFile.ReplayWriter?.Write(_writeBuffer.ToArray());
 					_writeBuffer.Clear();
 
@@ -142,8 +147,8 @@ namespace RumbleAnimator
 					MelonLogger.Msg("[RumbleAnimator] Recording stopped and file saved.");
 				}
 				
-				// indicator?.SetActive(!indicator.activeSelf);
 				isRecording = !isRecording;
+				recordingRing?.SetActive(isRecording);
 			}
 
 			if (currentScene is "Map0" or "Map1") 
@@ -431,8 +436,6 @@ namespace RumbleAnimator
 						
 						structure.transform.SetPositionAndRotation(frame.Value.position.ToVector3(), frame.Value.rotation.ToQuaternion());
 						MelonLogger.Msg($"[Replay] Setting structure {structure.name} | Position = {frame.Value.position.ToVector3()} | Rotation = {frame.Value.rotation.ToQuaternion()}");
-						
-						
 					}
 				}
 			}
@@ -460,20 +463,28 @@ namespace RumbleAnimator
 
 		private void InitializeRecordingBracelet()
 		{
-			// if (bracelet == null)
-			// {
-			// 	var bundle = Utilities.LoadBundle("bracelet");
-			// 	bracelet = bundle.LoadAsset<GameObject>("Bracelet");
-			// 	bundle.Unload(false);
-			// 	
-			// 	var visuals = bracelet.AddComponent<Components.BraceletVisuals>();
-			// 	visuals.StartPulse();
-			// }
-			//
-			// int hand = (bool)BraceletHand.SavedValue ? 2 : 3;
-			//
-			// bracelet.transform.SetParent(Calls.Players.GetLocalPlayer().Controller.transform.GetChild(4).GetChild(hand));
-			// bracelet.transform.localPosition = Vector3.zero;
+			if (recordingRing == null)
+			{
+				recordingRing = Utilities.LoadObjectFromBundle<GameObject>("bracelet", "Bracelet");
+				var braceletMat = Utilities.LoadObjectFromBundle<Material>("bracelet", "RecordingMat");
+				
+				braceletMat.shader = Shader.Find("Shader Graphs/RUMBLE_Prop");
+				braceletMat.SetTexture("_Albedo", Utilities.LoadObjectFromBundle<Texture2D>("bracelet", "LP_Cube_AlbedoTransparency", false));
+				recordingRing.GetComponent<MeshRenderer>().material = braceletMat;
+				
+				var visuals = recordingRing.AddComponent<Components.RecordingRingVisuals>();
+				visuals.Initialize();
+			}
+			
+			var recordingVisuals = recordingRing.GetComponent<Components.RecordingRingVisuals>();
+			recordingVisuals.SetPulsing(true);
+			
+			int hand = (bool)RecordingRingHand.SavedValue ? 1 : 2;
+			
+			recordingRing.transform.SetParent(Calls.Players.GetLocalPlayer().Controller.transform.GetChild(0).GetChild(1).GetChild(0).GetChild(4).GetChild(0).GetChild(hand).GetChild(0).GetChild(0).GetChild(0).GetChild(3)); // Ring finger for each hand
+			recordingRing.transform.localPosition = new Vector3(0, 0.0276f, 0);
+			recordingRing.transform.localScale = new Vector3(1.47f, 1.47f, 0.2916f);
+			recordingRing.transform.localRotation = Quaternion.Euler(90, 0, 0);
 		}
 
 		public void OnUIInit()
@@ -496,13 +507,21 @@ namespace RumbleAnimator
 				new Tags()
 			);
 			
-			BraceletHand = rumbleAnimatorMod.AddToList(
-				"Recording Bracelet Hand", 
+			RecordingRingHand = rumbleAnimatorMod.AddToList(
+				"Ring Hand", 
 				false, 
 				0, 
-				"Changes which hand the bracelet appears on when recording.\nFalse is the right hand, true is the left hand.", 
+				"Changes which hand the ring appears on when recording.\nFalse is the right hand, true is the left hand.", 
 				new Tags()
 			);
+
+			// ShouldPulse = rumbleAnimatorMod.AddToList(
+			// 	"Should Ring Pulse",
+			// 	true,
+			// 	0,
+			// 	"Changes whether the ring pulses when recording.\nFor people who don't like it pulsing",
+			// 	new Tags()
+			// );
 			
 			rumbleAnimatorMod.GetFromFile();
 			rumbleAnimatorMod.ModSaved += ModSaved;
@@ -513,13 +532,18 @@ namespace RumbleAnimator
 
 		private void ModSaved()
 		{
+			float previousDistance = SlabBuilder.Distance;
+			float previousHeightOffset = SlabBuilder.HeightOffset;
+			
 			SlabBuilder.Distance = (float)SlabDistance.SavedValue;
 			SlabBuilder.HeightOffset = (float)HeightOffset.SavedValue;
 			
 			if (currentScene is not "Loader")
 				InitializeRecordingBracelet();
 			
-			if (SlabBuilder.slabPrefab.transform.GetChild(0).GetChild(0).GetChild(0).gameObject.activeSelf)
+			if (SlabBuilder.slabPrefab is not null && 
+			    SlabBuilder.slabPrefab.transform.GetChild(0).GetChild(0).GetChild(0).gameObject.activeSelf && 
+			    (previousDistance != SlabBuilder.Distance || previousHeightOffset != SlabBuilder.HeightOffset))
 				SlabBuilder.ShowSlab();
 		}
     }

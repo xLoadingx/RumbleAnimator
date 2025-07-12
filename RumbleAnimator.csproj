@@ -19,6 +19,9 @@
       <Reference Include="Il2Cppmscorlib">
         <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2Cppmscorlib.dll</HintPath>
       </Reference>
+      <Reference Include="Il2CppPhotonRealtime">
+        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppPhotonRealtime.dll</HintPath>
+      </Reference>
       <Reference Include="Il2CppPhotonUnityNetworking">
         <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppPhotonUnityNetworking.dll</HintPath>
       </Reference>
@@ -33,6 +36,15 @@
       </Reference>
       <Reference Include="ModUI">
         <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\modui.dll</HintPath>
+      </Reference>
+      <Reference Include="NAudio">
+        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\UserLibs\NAudio.dll</HintPath>
+      </Reference>
+      <Reference Include="NAudio.Core">
+        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\UserLibs\NAudio.Core.dll</HintPath>
+      </Reference>
+      <Reference Include="NAudio.WinMM">
+        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\UserLibs\NAudio.WinMM.dll</HintPath>
       </Reference>
       <Reference Include="Newtonsoft.Json">
         <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\net6\Newtonsoft.Json.dll</HintPath>
@@ -61,6 +73,9 @@
       <Reference Include="UnityEngine.PhysicsModule">
         <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.PhysicsModule.dll</HintPath>
       </Reference>
+      <Reference Include="UnityEngine.UI">
+        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.UI.dll</HintPath>
+      </Reference>
       <Reference Include="UnityEngine.VFXModule">
         <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.VFXModule.dll</HintPath>
       </Reference>
@@ -68,8 +83,17 @@
 
     <ItemGroup>
       <None Remove="AssetBundles\bracelet" />
-      <EmbeddedResource Include="AssetBundles\bracelet" />
+      <None Remove="AssetBundles\audio" />
       <None Remove="AssetBundles\replaysettingsmeshes" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <EmbeddedResource Include="AssetBundles\bracelet" />
+      <None Remove="Audio\Slab_Dismiss.wav" />
+      <EmbeddedResource Include="Audio\Slab_Dismiss.wav" />
+    </ItemGroup>
+
+    <ItemGroup>
       <EmbeddedResource Include="AssetBundles\replaysettingsmeshes" />
     </ItemGroup>
 

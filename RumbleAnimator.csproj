@@ -19,6 +19,9 @@
       <Reference Include="Il2Cppmscorlib">
         <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2Cppmscorlib.dll</HintPath>
       </Reference>
+      <Reference Include="Il2CppPhoton3Unity3D">
+        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppPhoton3Unity3D.dll</HintPath>
+      </Reference>
       <Reference Include="Il2CppPhotonRealtime">
         <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppPhotonRealtime.dll</HintPath>
       </Reference>
@@ -76,6 +79,9 @@
       <Reference Include="UnityEngine.UI">
         <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.UI.dll</HintPath>
       </Reference>
+      <Reference Include="UnityEngine.UIModule">
+        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.UIModule.dll</HintPath>
+      </Reference>
       <Reference Include="UnityEngine.VFXModule">
         <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.VFXModule.dll</HintPath>
       </Reference>
@@ -90,11 +96,19 @@
     <ItemGroup>
       <EmbeddedResource Include="AssetBundles\bracelet" />
       <None Remove="Audio\Slab_Dismiss.wav" />
-      <EmbeddedResource Include="Audio\Slab_Dismiss.wav" />
+      <None Remove="Audio\Ricochet.wav" />
+      <None Remove="Audio\Slab_Contstruct.wav" />
+      <None Remove="Audio\Slab_Textchange.wav" />
+      <EmbeddedResource Include="Audio\Slab_Textchange.wav" />
+      <None Remove="Audio\Pedestal_Rise.wav" />
     </ItemGroup>
 
     <ItemGroup>
       <EmbeddedResource Include="AssetBundles\replaysettingsmeshes" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <EmbeddedResource Include="Audio\Slab_Dismiss.wav" />
     </ItemGroup>
 
     <Target Name="PostBuild" AfterTargets="PostBuildEvent">

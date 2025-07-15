@@ -6,7 +6,8 @@ public enum FrameType
     PlayerUpdate = 0,
     StackEvent = 1,
     StructureUpdate = 2,
-    VisualData = 3
+    VisualData = 3,
+    StructureDestroyed = 5
 }
 
 [Serializable]
@@ -30,6 +31,14 @@ public struct StructureFrame
     public float timestamp;
     public SVector3 position;
     public SQuaternion rotation;
+}
+
+[Serializable]
+public class StructureReplayData
+{
+    public List<StructureFrame> frames = new();
+    public int? destroyedAtFrame = null;
+    public int CurrentFrameIndex = 0;
 }
 
 [Serializable]

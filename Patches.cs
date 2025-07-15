@@ -39,8 +39,6 @@ public class Patches
                     timestamp = timestamp,
                     stack = stack?.CachedName
                 };
-			    
-                MelonLogger.Msg($"[Write] StackEvent: time={stackEvent.timestamp}, name = '{stackEvent.stack}");
 
                 using var ms = new MemoryStream();
                 using var bw = new BinaryWriter(ms);
@@ -83,8 +81,32 @@ public class Patches
                 {
                     __result.GetComponent<Rigidbody>().isKinematic = true;
                 }
+            }
+        }
+    }
 
-                MelonLogger.Msg($"[Replay] Tracked spawned structure: {__result.name}");
+    [HarmonyPatch(typeof(Structure), nameof(Structure.Kill))]
+    public class Patch_Structure_Kill
+    {
+        public static void Prefix(Structure __instance)
+        {
+            if (!Main.isRecording)
+                return;
+            
+            GameObject go = __instance.gameObject;
+
+            int index = Main.structures.IndexOf(go);
+            if (index is -1 || index >= Main.structureDataList.Count)
+                return;
+
+            var replayData = Main.structureDataList[index];
+            if (replayData.destroyedAtFrame == null)
+            {
+                replayData.destroyedAtFrame = Main.currentRecordingFrame;
+                MelonLogger.Msg($"[Replay] Structure {__instance.name} destroyed at frame {Main.currentRecordingFrame}");
+                
+                var data = Codec.EncodeStructureDestroyed(index, Main.currentRecordingFrame);
+                ReplayFile.WriteFramedData(data, Main.currentRecordingFrame, FrameType.StructureDestroyed);
             }
         }
     }

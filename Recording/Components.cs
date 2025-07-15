@@ -24,6 +24,9 @@ public class Components
         public GameObject disableObject;
         public float punchSpeedThreshold = 1.5f;
         public VisualEffect destroyVFX;
+        public string destroySFXName;
+
+        public Action onDisabled;
 
         private Transform lPhysicsHand;
         private Transform rPhysicsHand;
@@ -36,12 +39,8 @@ public class Components
 
         private void OnTriggerEnter(Collider other)
         {
-            MelonLogger.Msg($"Collider name: {other.name} | IsHit: {IsHit(lPhysicsHand, other, true) || IsHit(rPhysicsHand, other, false)} | lPhysicsHand magnitude: {lPhysicsHand.GetComponent<Rigidbody>().velocity.magnitude} | rPhysicsHand magnitude: {rPhysicsHand.GetComponent<Rigidbody>().velocity.magnitude}");
-            
             if (IsHit(lPhysicsHand, other, true) || IsHit(rPhysicsHand, other, false) && disableObject.activeSelf)
-            {
                 Disable();
-            }
         }
 
         private bool ContainsLeftOrRight(GameObject obj, bool left)
@@ -64,7 +63,11 @@ public class Components
         public void Disable()
         {
             destroyVFX?.Play();
-            MelonCoroutines.Start(Utilities.PlaySound("Slab_Dismiss.wav"));
+            
+            if (destroySFXName is not null)
+                MelonCoroutines.Start(Utilities.PlaySound(destroySFXName));
+
+            onDisabled?.Invoke();
             disableObject.gameObject.SetActive(false);
         }
     }
@@ -75,11 +78,13 @@ public class Components
          private Renderer renderer;
          private float pulseProgress = 0f;
 
-         private bool shouldPulse;
+         public bool shouldPulse;
          public float frequency = 1.5f;
 
          void Update()
          {
+             if (!shouldPulse) return;
+             
              pulseProgress += Time.deltaTime;
 
              // y = 1 - min(mod(x, 1.5), 1)
@@ -100,22 +105,6 @@ public class Components
              
              if (!ShouldPulse)
                 renderer.material.SetColor("_Overlay", new Color(0, 0, 0, 1));
-         }
-         
-         public IEnumerator StopPulse()
-         {
-             const float epsilon = 0.03f;
-
-             while (true)
-             {
-                 float remainder = pulseProgress % frequency;
-                 if (remainder < epsilon || remainder > frequency - epsilon)
-                     break;
-
-                 yield return null;
-             }
-
-             shouldPulse = false;
          }
      }
 } 

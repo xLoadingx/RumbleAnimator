@@ -136,25 +136,52 @@ public class Codec
         return ms.ToArray();
     }
 
-    public static void DecodeStructureFrame(byte[] data, List<List<StructureFrame>> frames)
+    public static void DecodeStructureFrame(byte[] data, List<StructureReplayData> structures)
     {
         using var ms = new MemoryStream(data);
         using var br = new BinaryReader(ms);
 
         int index = br.ReadInt32();
         float timestamp = br.ReadSingle();
+        var position = ReadVec3(br);
+        var rotation = ReadQuat(br);
 
         var frame = new StructureFrame
         {
             timestamp = timestamp,
-            position = ReadVec3(br),
-            rotation = ReadQuat(br),
+            position = position,
+            rotation = rotation
         };
+        
+        while (structures.Count <= index)
+            structures.Add(new StructureReplayData());
 
-        while (frames.Count <= index)
-            frames.Add(new List<StructureFrame>());
+        structures[index].frames.Add(frame);
+    }
 
-        frames[index].Add(frame);
+    public static byte[] EncodeStructureDestroyed(int structureIndex, int destroyedAtFrame)
+    {
+        using var ms = new MemoryStream();
+        using var bw = new BinaryWriter(ms);
+        
+        bw.Write(structureIndex);
+        bw.Write(destroyedAtFrame);
+        
+        return ms.ToArray();
+    }
+
+    public static void DecodeStructureDestroyed(byte[] data, List<StructureReplayData> structures)
+    {
+        using var ms = new MemoryStream(data);
+        using var br = new BinaryReader(ms);
+
+        int index = br.ReadInt32();
+        int destroyedAtFrame = br.ReadInt32();
+        
+        while (structures.Count <= index)
+            structures.Add(new StructureReplayData());
+        
+        structures[index].destroyedAtFrame = destroyedAtFrame;
     }
 
     private static void WriteVec3(BinaryWriter bw, SVector3 vec3)

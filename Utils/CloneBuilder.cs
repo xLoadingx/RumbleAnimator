@@ -43,6 +43,7 @@ public class CloneBuilder
         Player localPlayer = Calls.Players.GetLocalPlayer();
 
         GameObject clone = GameObject.Instantiate(Calls.Managers.GetPlayerManager().PlayerControllerPrefab.gameObject);
+        clone.transform.position = new Vector3(0, -100, 0);
         PlayerController cloneController = clone.GetComponent<PlayerController>();
 
         clone.transform.position = initialPosition;

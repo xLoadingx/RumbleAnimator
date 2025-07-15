@@ -20,6 +20,31 @@ public static class Utilities
         { "Pit", "Pit" }
     };
 
+    public static string FixColorTags(string input)
+    {
+        if (input is null)
+            return null;
+        
+        var output = new StringBuilder();
+        bool firstTag = true;
+
+        for (int i = 0; i < input.Length; i++)
+        {
+            if (input[i] == '<' && i + 1 < input.Length && input[i + 1] == '#')
+            {
+                if (!firstTag)
+                    output.Append("</color>");
+                else
+                    firstTag = false;
+            }
+
+            output.Append(input[i]);
+        }
+
+        output.Append("</color>");
+        return output.ToString();
+    }
+
     public static string TryGetActiveCustomMap()
     {
         var root = GameObject.Find("CustomMultiplayerMaps");
@@ -36,24 +61,48 @@ public static class Utilities
         return null;
     }
 
+    public enum EaseType
+    {
+        None,
+        EaseIn,
+        EaseOut,
+        EaseInOut
+    }
+
+    public static float ApplyEase(float t, EaseType type)
+    {
+        return type switch
+        {
+            EaseType.None => t,
+            EaseType.EaseIn => Pow(t, 3),
+            EaseType.EaseOut => 1f - Pow(1f - t, 3),
+            EaseType.EaseInOut => 0.5f * (1f - Cos(t * PI)),
+            _ => t
+        };
+    }
+
     public static IEnumerator EaseLerp<T>(
         T from,
         T to,
         float duration,
         Func<T, T, float, T> lerpFunc,
-        Action<T> onUpdate)
+        Action<T, float> onUpdate,
+        Action onComplete = null,
+        EaseType ease = EaseType.EaseOut)
     {
         float time = 0f;
+        float t = 0f;
         while (time < duration)
         {
-            float t = time / duration;
-            float easedT = 0.5f * (1f - Cos(t * PI));
-            onUpdate(lerpFunc(from, to, easedT));
+            t = time / duration;
+            float easedT = ApplyEase(t, ease);
+            onUpdate(lerpFunc(from, to, easedT), t);
             time += Time.deltaTime;
             yield return null;
         }
 
-        onUpdate(to);
+        onUpdate(to, t);
+        onComplete?.Invoke();
     }
 
     public static IEnumerator PlaySound(string name)

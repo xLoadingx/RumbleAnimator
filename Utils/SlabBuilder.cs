@@ -1,3 +1,4 @@
+using System.Collections;
 using Il2CppRUMBLE.Interactions;
 using Il2CppRUMBLE.Interactions.InteractionBase;
 using Il2CppRUMBLE.Slabs.Forms;
@@ -7,7 +8,9 @@ using MelonLoader.Utils;
 using RumbleAnimator.Recording;
 using UnityEngine;
 using RumbleModdingAPI;
+using UnityEngine.UI;
 using UnityEngine.VFX;
+using static UnityEngine.Mathf;
 
 namespace RumbleAnimator.Utils;
 
@@ -20,15 +23,25 @@ public class SlabBuilder
     public static List<TextMeshPro> fileNameTexts = new();
     public static List<GameObject> buttons = new();
     public static GameObject replayFilesText;
+    public static GameObject pageAmountText;
     public static GameObject previousPageButton;
     public static GameObject nextPageButton;
+    
+    public static GameObject currentHighlight;
+    public static string currentSelectedFile;
+    public static bool isAnimating;
+    public static object currentSlabRoutine;
 
     public static Components.DisableOnHit mainSlabDestroy;
+    
+    public static event EventDelegates.File onFileSelected;
     
     public static List<string[]> paginatedFiles = new();
     private static int currentPage = 0;
 
     public static bool IsBuilt;
+    public static bool IsSmallerSlabShown;
+    public static bool IsShown;
     public static float Distance = 0.4f;
     public static float HeightOffset = 2.0f;
 
@@ -77,21 +90,25 @@ public class SlabBuilder
         nextPageButton = Calls.Create.NewButton(() =>
         {
             currentPage = (currentPage + 1) % 4;
+            pageAmountText.GetComponent<TextMeshPro>().text = $"Page {currentPage + 1} of {paginatedFiles.Count}";
             ShowPage(currentPage);
         });
         nextPageButton.transform.SetParent(slabMesh.transform);
         nextPageButton.transform.localRotation = Quaternion.Euler(0, 90, 90);
-        nextPageButton.transform.localPosition = new Vector3(-0.3095f, -0.1884f, 0.1305f);
+        nextPageButton.transform.localPosition = new Vector3(-0.3716f, -0.1339f, 0.1383f);
+        nextPageButton.transform.localScale = Vector3.one * 0.7f;
         nextPageButton.name = "NextPageButton";
 
         previousPageButton = Calls.Create.NewButton(() =>
         {
             currentPage = (currentPage - 1 + 4) % 4;
+            pageAmountText.GetComponent<TextMeshPro>().text = $"Page {currentPage + 1} of {paginatedFiles.Count}";
             ShowPage(currentPage);
         });
         previousPageButton.transform.SetParent(slabMesh.transform);
         previousPageButton.transform.localRotation = Quaternion.Euler(0, 270, 270);
-        previousPageButton.transform.localPosition = new Vector3(0.0935f, -0.1884f, 0.1305f);
+        previousPageButton.transform.localPosition = new Vector3(0.1927f, -0.1339f, 0.1383f);
+        previousPageButton.transform.localScale = Vector3.one * 0.7f;
         previousPageButton.name = "PreviousPageButton";
 
         for (int i = 0; i < meshes.transform.childCount; i++)
@@ -111,14 +128,41 @@ public class SlabBuilder
             Transform interactionButton = buttonFrame.transform.GetChild(0);
             var interactorButton = Calls.Create.NewButton(() =>
             {
-                MelonLogger.Msg($"File selected: {interactionButton.GetComponent<Components.TagHolder>().holder}");
-                MelonCoroutines.Start(Utilities.EaseLerp(new Vector3(-0.06f, 0.0836f, 0.1309f),
-                new Vector3(0, 0, 0), 1.3f, Vector3.Lerp,
-                curPos =>
+                if (Main.isPlaying || isAnimating) return;
+                
+                currentHighlight?.SetActive(false);
+                
+                if (currentSelectedFile == interactionButton.GetComponent<Components.TagHolder>().holder)
                 {
-                    if (smallerSlabSettings != null) 
-                        smallerSlabSettings.transform.localPosition = curPos;
-                }));
+                    currentHighlight = null;
+                    currentSelectedFile = null;
+
+                    MelonCoroutines.Start(WaitThenStart(HideSmallSlab()));
+                }
+                else
+                {
+                    smallerSlabSettings.transform.GetChild(0).gameObject.SetActive(true);
+                    currentHighlight = buttonFrame.transform.GetChild(1).gameObject;
+                    currentHighlight.SetActive(true);
+                    
+                    currentSelectedFile = interactionButton.GetComponent<Components.TagHolder>().holder;
+
+                    onFileSelected?.Invoke(currentSelectedFile);
+                    
+                    if (!IsSmallerSlabShown)
+                    {
+                        smallerSlabSettings.transform.localRotation = Quaternion.Euler(0, 0, 0);
+                        smallerSlabSettings.SetActive(true);
+                        MelonCoroutines.Start(Utilities.PlaySound("Slab_Construct.wav"));
+
+                        MelonCoroutines.Start(WaitThenStart(ShowSmallSlab()));
+                    }
+                    else
+                    {
+                        MelonCoroutines.Start(Utilities.PlaySound("Slab_Textchange.wav"));
+                        smallerSlabSettings.transform.GetChild(3).GetComponent<VisualEffect>().Play();
+                    }
+                }
             });
             interactorButton.name = "PushableButton";
             interactorButton.transform.SetParent(interactionButton);
@@ -132,14 +176,26 @@ public class SlabBuilder
             };
 
             interactorButton.transform.localRotation = Quaternion.Euler(0, 270, 0);
-            interactorButton.transform.localPosition = new Vector3(0, -0.0015f, buttonZPosition);
-            interactorButton.transform.localScale = new Vector3(0.0033f, 0.0081f, 0.0452f);
+            interactorButton.transform.localScale = new Vector3(0.0033f, -0.00101f, 0.0425f);
             interactorButton.GetComponent<MeshRenderer>().enabled = false;
             interactorButton.transform.GetChild(0).GetChild(2).GetComponent<MeshRenderer>().enabled = false;
             interactorButton.transform.GetChild(0).GetComponent<MeshRenderer>().enabled = false;
-            buttonFrame.transform.GetChild(0).GetChild(0).SetParent(interactorButton.transform.GetChild(0), true);
+            var buttonMesh = buttonFrame.transform.GetChild(0).GetChild(0);
+            buttonMesh.SetParent(interactorButton.transform.GetChild(0), true);
+            buttonMesh.transform.localRotation = Quaternion.Euler(0, 90, 0);
+            buttonMesh.transform.localPosition = new Vector3(0, -0.0435f, 0);
+            interactorButton.transform.localPosition = new Vector3(0, -0.0009f, buttonZPosition);
             interactionButton.gameObject.AddComponent<Components.TagHolder>();
             buttons.Add(interactionButton.gameObject);
+
+            GameObject buttonHighlight = GameObject.Instantiate(Calls.GameObjects.Gym.Logic.HeinhouserProducts
+                .Leaderboard.PlayerTags.PersonalHighscoreTag.PlayerTag.GetGameObject().transform.GetChild(0).GetChild(0)
+                .GetChild(7)).gameObject;
+            buttonHighlight.transform.SetParent(buttonFrame.transform, false);
+            buttonHighlight.transform.localPosition = new Vector3(0.0002f, -0.0011f, 0.00407f);
+            buttonHighlight.transform.localRotation = Quaternion.Euler(0, 270, 90);
+            buttonHighlight.transform.localScale = new Vector3(0.0001f, 0.0006f, 0.014f);
+            buttonHighlight.SetActive(false);
             
             GameObject fileNameTxt = Calls.Create.NewText(
                 "FileName", 1f, Color.yellow, Vector3.zero, Quaternion.identity
@@ -156,6 +212,15 @@ public class SlabBuilder
             
             fileNameTexts.Add(fileNameTxt.GetComponent<TextMeshPro>());
         }
+
+        FileSystemWatcher watcher = new FileSystemWatcher();
+        watcher.Path = Path.Combine(MelonEnvironment.UserDataDirectory, "MatchReplays");
+        watcher.IncludeSubdirectories = false;
+        watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite;
+
+        watcher.Created += (sender, e) => { UpdatePages(); ShowPage(currentPage); };
+        watcher.Deleted += (sender, e) => { UpdatePages(); ShowPage(currentPage); };
+        watcher.Changed += (sender, e) => { UpdatePages(); ShowPage(currentPage); };
 
         GameObject replayText = Calls.Create.NewText(
             "Replays", 2f, new Color(0.102f, 0.0667f, 0.051f, 1),
@@ -176,18 +241,47 @@ public class SlabBuilder
         replayFilesText.transform.SetParent(slabMesh.transform);
         replayFilesText.transform.localPosition = new Vector3(-0.1069f, 0.561f, 0.1578f);
         replayFilesText.transform.localRotation = Quaternion.Euler(0, 180, 0);
-        
-        GameObject nextPageText = Calls.Create.NewText("Next Page", 0.7f, new Color(0.102f, 0.0667f, 0.051f, 1), Vector3.zero, Quaternion.identity);
-        nextPageText.transform.SetParent(nextPageButton.transform);
-        nextPageText.transform.localRotation = Quaternion.Euler(90, 90, 0);
-        nextPageText.transform.localPosition = new Vector3(-0.1065f, 0.0204f, -0.2475f);
-        nextPageText.name = "NextPageText";
 
-        GameObject previousPageText = Calls.Create.NewText("Previous Page", 0.7f, new Color(0.102f, 0.0667f, 0.051f, 1), Vector3.zero, Quaternion.identity);
-        previousPageText.transform.SetParent(previousPageButton.transform);
-        previousPageText.transform.localRotation = Quaternion.Euler(90, 270, 0);
-        previousPageText.transform.localPosition = new Vector3(0.1021f, 0.0204f, 0.1656f);
-        previousPageText.name = "PreviousPageText";
+        var sprite = Calls.GameObjects.Gym.Logic.HeinhouserProducts.Telephone.FriendScreen.GetGameObject()
+            .transform.GetChild(2).GetChild(0).GetChild(0).GetChild(3).GetChild(0).GetComponent<Image>().sprite;
+        
+        var nextPageCanvas = new GameObject("Canvas").AddComponent<Canvas>();
+        nextPageCanvas.renderMode = RenderMode.WorldSpace;
+        nextPageCanvas.transform.SetParent(nextPageButton.transform.GetChild(0), false);
+        nextPageCanvas.transform.localPosition = new Vector3(0, 0.0135f, 0);
+        nextPageCanvas.transform.localRotation = Quaternion.Euler(90, 90, 0);
+        nextPageCanvas.transform.localScale = Vector3.one * 0.001f;
+        
+        var nextPageImageGO = new GameObject("NextPageImage");
+        nextPageImageGO.transform.SetParent(nextPageCanvas.transform, false);
+        var nextPageImage = nextPageImageGO.AddComponent<Image>();
+        nextPageImage.sprite = sprite;
+        nextPageImage.color = new Color(0.824f, 0.827f, 0.287f, 1);
+        
+        var previousPageCanvas = new GameObject("Canvas").AddComponent<Canvas>();
+        previousPageCanvas.renderMode = RenderMode.WorldSpace;
+        previousPageCanvas.transform.SetParent(previousPageButton.transform.GetChild(0), false);
+        previousPageCanvas.transform.localPosition = new Vector3(0, 0.0135f, 0);
+        previousPageCanvas.transform.localRotation = Quaternion.Euler(90, 90, 0);
+        previousPageCanvas.transform.localScale = Vector3.one * 0.001f;
+        
+        var previousPageImageGO = new GameObject("PreviousPageImage");
+        previousPageImageGO.transform.SetParent(previousPageCanvas.transform, false);
+        var previousPageImage = previousPageImageGO.AddComponent<Image>();
+        previousPageImage.sprite = sprite;
+        previousPageImage.color = new Color(0.824f, 0.827f, 0.287f, 1);
+        
+        pageAmountText = Calls.Create.NewText("1 / 1", 0.7f, new Color(0.102f, 0.0667f, 0.051f, 1), Vector3.zero, Quaternion.identity);
+        pageAmountText.transform.SetParent(slabMesh.transform);
+        pageAmountText.transform.localRotation = Quaternion.Euler(0, 180, 0);
+        pageAmountText.transform.localPosition = new Vector3(-0.38f, -0.1417f, 0.1484f);
+        pageAmountText.name = "PageAmountText";
+        
+        GameObject punchText = Calls.Create.NewText("Punch to Dismiss!", 0.7f, new Color(0.102f, 0.0667f, 0.051f, 1), Vector3.zero, Quaternion.identity);
+        punchText.transform.SetParent(slabMesh.transform);
+        punchText.transform.localRotation = Quaternion.Euler(0, 180, 0);
+        punchText.transform.localPosition = new Vector3(-0.2891f, -0.5278f, 0.1484f);
+        punchText.name = "PunchText";
 
         var infoSlab = slab.GetChild(0).GetChild(0).GetChild(0);
         GameObject.Destroy(infoSlab.GetComponent<DisposableObject>());
@@ -196,7 +290,12 @@ public class SlabBuilder
         GameObject disposableGO = infoSlab.GetChild(2).gameObject;
         mainSlabDestroy = disposableGO.AddComponent<Components.DisableOnHit>();
         mainSlabDestroy.destroyVFX = infoSlab.GetChild(4).GetComponent<VisualEffect>();
+        mainSlabDestroy.destroySFXName = "Slab_Dismiss.wav";
         mainSlabDestroy.disableObject = infoSlab.GetChild(0).gameObject;
+        mainSlabDestroy.onDisabled += () => { 
+            IsSmallerSlabShown = false;
+            IsShown = false;
+        };
         mainSlabDestroy.Initialize();
         
         smallerSlabSettings = GameObject.Instantiate(Calls.GameObjects.Gym.Logic.Notifications.NotificationSlabOther.
@@ -207,9 +306,134 @@ public class SlabBuilder
         );
         smallerSlabSettings.name = "SmallerSlabSettings";
         smallerSlabSettings.transform.SetParent(slabMesh.transform);
-        smallerSlabSettings.transform.localPosition = new Vector3(-0.06f, 0.0836f, 0.1309f);
+        smallerSlabSettings.transform.SetPositionAndRotation(new Vector3(-0.06f, 0.0836f, 0.1309f), Quaternion.Euler(0, 0, 0));
+        smallerSlabSettings.transform.localScale = new Vector3(1.25f, 1.25f, 0.4027f);
+        GameObject.Destroy(smallerSlabSettings.GetComponent<SlabText>());
+        GameObject.Destroy(smallerSlabSettings.GetComponent<DisposableObject>());
+        smallerSlabSettings.transform.GetChild(1).gameObject.SetActive(false);
+        var disableOnHit = smallerSlabSettings.transform.GetChild(2).gameObject.AddComponent<Components.DisableOnHit>();
+        disableOnHit.disableObject = smallerSlabSettings.transform.GetChild(0).gameObject;
+        disableOnHit.destroyVFX = smallerSlabSettings.transform.GetChild(4).GetComponent<VisualEffect>();
+        disableOnHit.destroySFXName = "Slab_Dismiss.wav";
+        disableOnHit.onDisabled += () => { IsSmallerSlabShown = false; smallerSlabSettings.transform.GetChild(0).GetChild(0).GetChild(0).gameObject.SetActive(false); };
+        disableOnHit.Initialize();
+
+        GameObject smallerSlabObjects = new GameObject("SmallSlabObjects");
+        smallerSlabObjects.transform.SetParent(smallerSlabSettings.transform.GetChild(0).GetChild(0), false);
+        GameObject playButton = Calls.Create.NewButton(() => { Main.PlayReplayFile(currentSelectedFile); });
+        playButton.transform.SetParent(smallerSlabObjects.transform, false);
+        playButton.transform.localRotation = Quaternion.Euler(270, 180, 0);
+        playButton.transform.localPosition = new Vector3(0, 0.1527f, 0);
+        
+        var playButtonCanvas = new GameObject("Canvas").AddComponent<Canvas>();
+        playButtonCanvas.renderMode = RenderMode.WorldSpace;
+        playButtonCanvas.transform.SetParent(playButton.transform.GetChild(0), false);
+        playButtonCanvas.transform.localPosition = new Vector3(0, 0.0135f, 0);
+        playButtonCanvas.transform.localRotation = Quaternion.Euler(90, 90, 0);
+        playButtonCanvas.transform.localScale = Vector3.one * 0.001f;
+        
+        var playButtonImageGO = new GameObject("NextPageImage");
+        playButtonImageGO.transform.SetParent(nextPageCanvas.transform, false);
+        var playButtonImage = nextPageImageGO.AddComponent<Image>();
+        playButtonImage.sprite = sprite;
+        playButtonImage.color = new Color(0.824f, 0.827f, 0.287f, 1);
 
         IsBuilt = true;
+    }
+
+    public static IEnumerator HideSmallSlab()
+    {
+        isAnimating = true;
+        bool moveZDone = false;
+        bool rotYDone = false;
+        
+        MelonCoroutines.Start(Utilities.EaseLerp(0.4296f, 0.1309f, 0.8f, Lerp,
+            (pos, time) =>
+            {
+                if (smallerSlabSettings != null)
+                    smallerSlabSettings.transform.localPosition =
+                        new Vector3(-1.0647f, 0.0836f, pos);
+            },
+            onComplete: () => moveZDone = true));
+                    
+        MelonCoroutines.Start(Utilities.EaseLerp(35.3818f, 0f, 0.8f, Lerp,
+            (rot, time) =>
+            {
+                if (smallerSlabSettings != null)
+                    smallerSlabSettings.transform.localRotation = Quaternion.Euler(0, rot, 0);
+            },
+            ease: Utilities.EaseType.EaseInOut, onComplete: () => rotYDone = true));
+
+        while (!moveZDone || !rotYDone)
+            yield return null;
+        
+        MelonCoroutines.Start(Utilities.PlaySound("Slab_Textchange.wav"));
+        smallerSlabSettings.transform.GetChild(3).GetComponent<VisualEffect>().Play();
+        smallerSlabSettings.transform.GetChild(0).GetChild(0).GetChild(0).gameObject.SetActive(false);
+        
+        yield return Utilities.EaseLerp(-1.0647f, -0.06f, 1.3f, Lerp,
+            (pos, time) =>
+            {
+                if (smallerSlabSettings != null)
+                    smallerSlabSettings.transform.localPosition =
+                        new Vector3(pos, 0.0836f, 0.1309f);
+            });
+
+        smallerSlabSettings.SetActive(false);
+        IsSmallerSlabShown = false;
+        isAnimating = false;
+    }
+
+    public static IEnumerator ShowSmallSlab()
+    {
+        isAnimating = true;
+        
+        yield return Utilities.EaseLerp(-0.06f, -1.0647f, 1.3f, Lerp,
+            (pos, time) =>
+            {
+                if (smallerSlabSettings != null)
+                    smallerSlabSettings.transform.localPosition = new Vector3(pos, 0.0836f, 0.1309f);
+            });
+        
+        MelonCoroutines.Start(Utilities.PlaySound("Slab_Textchange.wav"));
+        smallerSlabSettings.transform.GetChild(3).GetComponent<VisualEffect>().Play();
+        smallerSlabSettings.transform.GetChild(0).GetChild(0).GetChild(0).gameObject.SetActive(true);
+
+        bool moveZDone = false;
+        bool rotYDone = false;
+        
+        MelonCoroutines.Start(Utilities.EaseLerp(0.1309f, 0.4296f, 0.8f, Lerp,
+            (pos, time) =>
+            {
+                if (smallerSlabSettings != null)
+                    smallerSlabSettings.transform.localPosition =
+                        new Vector3(-1.0647f, 0.0836f, pos);
+            }, 
+            onComplete: () => moveZDone = true));
+                                
+        MelonCoroutines.Start(Utilities.EaseLerp(0f, 35.3818f, 0.8f, Lerp,
+            (rot, time) =>
+            {
+                if (smallerSlabSettings != null)
+                    smallerSlabSettings.transform.localRotation = Quaternion.Euler(0, rot, 0);
+            },
+            ease: Utilities.EaseType.EaseInOut,
+            onComplete: () => rotYDone = true));
+
+        while (!moveZDone || !rotYDone)
+            yield return null;
+        
+        smallerSlabSettings.SetActive(true);
+        IsSmallerSlabShown = true;
+        isAnimating = false;
+    }
+
+    private static IEnumerator WaitThenStart(IEnumerator nextRoutine)
+    {
+        while (isAnimating)
+            yield return null;
+
+        currentSlabRoutine = MelonCoroutines.Start(nextRoutine);
     }
 
     public static void ShowPage(int page)
@@ -218,6 +442,13 @@ public class SlabBuilder
             return;
         
         var files = paginatedFiles[page];
+
+        if (files.Length is 0)
+        {
+            for (int i = 0; i < fileNameTexts.Count; i++)
+                fileNameTexts[i].transform.parent.gameObject.SetActive(false);
+            return;
+        }
         
         for (int i = 0; i < fileNameTexts.Count; i++)
         {
@@ -229,38 +460,86 @@ public class SlabBuilder
 
             buttons[i].GetComponent<Components.TagHolder>().holder = files[i];
             
-            using var stream = new FileStream(files[i], FileMode.Open, FileAccess.Read);
-            using var reader = new BinaryReader(stream);
-            var header = ReplayFile.GetHeaderFromFile(files[i], stream, reader);
-
-            string display = $"Unrecognized scene ({header.Scene}) | {header.Date}";
-            string sceneName = Utilities.GetFriendlySceneName(header.Scene);
-
-            string hostPrefix = header.HostPlayer is not null && header.HostPlayer != header.LocalPlayer
-                ? $"{header.HostPlayer}'s "
-                : "";
-
-            if (sceneName is "Gym")
+            ReplayFile.WithReplayReader(files[i], reader =>
             {
-                display = $"Gym - {header.LocalPlayer} | {header.Date}";
-            }
-            else if (sceneName is "Park")
-            {
-                display = $"{hostPrefix}Park - {header.LocalPlayer} | {header.Date} {header.playerCount} | {(header.playerCount > 1 ? "Players" : "Player")}";
-            }
-            else
-            {
-                string finalScene = sceneName == "Custom"
-                    ? (header.Meta.TryGetValue("customMapName", out var name) ? name?.ToString() ?? "Custom" : "Custom")
-                    : sceneName;
+                var header = ReplayFile.GetHeaderFromFile(files[i], reader);
+                
+                string display = $"Unrecognized scene ({header.Scene}) | {header.Date}";
+                string sceneName = Utilities.GetFriendlySceneName(header.Scene);
 
-                display = $"{header.LocalPlayer} vs {header.opponent ?? "Unknown"} on {finalScene} | {header.Date}";
-            }
+                string hostPrefix = header.HostPlayer is not null && header.HostPlayer != header.LocalPlayer
+                    ? $"{header.HostPlayer}'s "
+                    : "";
+
+                if (sceneName is "Gym")
+                {
+                    display = $"Gym - {header.LocalPlayer} | {header.Date}";
+                }
+                else if (sceneName is "Park")
+                {
+                    display = $"{hostPrefix}Park - {header.LocalPlayer} | {header.Date} {header.playerCount} | {(header.playerCount > 1 ? "Players" : "Player")}";
+                }
+                else
+                {
+                    string finalScene = sceneName == "Custom"
+                        ? (header.Meta.TryGetValue("customMapName", out var name) ? name?.ToString() ?? "Custom" : "Custom")
+                        : sceneName;
+
+                    display = $"{header.LocalPlayer} vs {header.opponent ?? "Unknown"} on {finalScene} | {header.Date}";
+                }
             
-            fileNameTexts[i].transform.parent.gameObject.SetActive(true);
-            fileNameTexts[i].text = display;
-            fileNameTexts[i].ForceMeshUpdate();
+                fileNameTexts[i].transform.parent.gameObject.SetActive(true);
+                fileNameTexts[i].text = display;
+                fileNameTexts[i].ForceMeshUpdate();
+            });
         }
+    }
+
+    public static Dictionary<string, string> UpdatePages()
+    {
+        paginatedFiles.Clear();
+
+        string directory = Path.Combine(MelonEnvironment.UserDataDirectory, "MatchReplays");
+        int itemsPerPage = 4;
+        
+        string[] allFiles = Directory.GetFiles(directory)
+            .Where(f => f.EndsWith(".replay") || f.EndsWith(".replay.br"))
+            .ToArray();
+        
+        var filesByName = new Dictionary<string, string>();
+
+        foreach (string file in allFiles)
+        {
+            string name = Path.GetFileNameWithoutExtension(file);
+            if (file.EndsWith(".br") || !filesByName.ContainsKey(name))
+            {
+                filesByName[name] = file;
+            }
+        }
+        
+        string[] finalReplayFiles = filesByName.Values.ToArray();
+        
+        finalReplayFiles = finalReplayFiles
+            .OrderByDescending(File.GetCreationTime)
+            .ToArray();
+        
+        int totalPages = (int)Math.Ceiling(finalReplayFiles.Length / (float)itemsPerPage);
+
+        for (int page = 0; page < totalPages; page++)
+        {
+            var pageItems = finalReplayFiles
+                .Skip(page * itemsPerPage)
+                .Take(itemsPerPage)
+                .ToArray();
+
+            if (pageItems.Length > 0)
+                paginatedFiles.Add(pageItems);
+        }
+
+        IsSmallerSlabShown = false;
+        smallerSlabSettings.SetActive(false);
+
+        return filesByName;
     }
 
     public static void ShowSlab()
@@ -281,28 +560,26 @@ public class SlabBuilder
         float angle = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
         spawnTransform.rotation = Quaternion.Euler(0f, angle, 0f);
 
-        paginatedFiles.Clear();
-        string directory = Path.Combine(MelonEnvironment.UserDataDirectory, "MatchReplays");
-        int itemsPerPage = 4;
-        string[] replayFiles = Directory.GetFiles(directory, "*.replay");
-        int totalPages = (int)Math.Ceiling(replayFiles.Length / (float)itemsPerPage);
-
-        for (int page = 0; page < totalPages; page++)
-        {
-            var pageItems = replayFiles
-                .Skip(page * itemsPerPage)
-                .Take(itemsPerPage)
-                .ToArray();
-            paginatedFiles.Add(pageItems);
-        }
+        var filesByName = UpdatePages();
 
         currentPage = 0;
         ShowPage(currentPage);
-        replayFilesText.GetComponent<TextMeshPro>().text = $"Replay Files ({replayFiles.Length})";
-        replayFilesText.GetComponent<TextMeshPro>().ForceMeshUpdate();
         
+        replayFilesText.GetComponent<TextMeshPro>().text = filesByName.Count > 0 ? $"Replay Files ({filesByName.Count})" : "No Replay Files";
+        replayFilesText.GetComponent<TextMeshPro>().ForceMeshUpdate();
+
+        pageAmountText.GetComponent<TextMeshPro>().text = $"Page {currentPage + 1} / {paginatedFiles.Count}";
         slabPrefab.transform.GetChild(0).GetChild(0).GetChild(0).GetChild(0).GetChild(0).gameObject.SetActive(true);
+        slabPrefab.SetActive(true);
+        
+        smallerSlabSettings.transform.SetPositionAndRotation(new Vector3(-0.06f, 0.0836f, 0.1309f), Quaternion.Euler(0, 0, 0));
+        IsSmallerSlabShown = false;
+        smallerSlabSettings.SetActive(false);
+        
+        mainSlabDestroy.Initialize();
+        smallerSlabSettings.transform.GetChild(2).GetComponent<Components.DisableOnHit>().Initialize();
         
         slabButton.RPC_OnPressed();
+        IsShown = true;
     }
 }

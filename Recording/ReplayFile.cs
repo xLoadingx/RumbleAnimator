@@ -1,4 +1,7 @@
+using System.Collections;
+using System.IO.Compression;
 using System.Text;
+using Il2CppPhoton.Pun;
 using MelonLoader;
 using MelonLoader.Utils;
 using Newtonsoft.Json;
@@ -27,6 +30,80 @@ public class ReplayFile
 
         public int playerCount;
         public Dictionary<string, object> Meta = new();
+    }
+
+    public static Task CompressAsync(string inputPath, string outputPath)
+    {
+        return Task.Run(() =>
+        {
+            using var input = File.OpenRead(inputPath);
+            using var output = File.Create(outputPath);
+            using var brotli = new BrotliStream(output, CompressionLevel.Optimal);
+            input.CopyTo(brotli);
+        });
+    }
+
+    public static MemoryStream DecompressToMemory(string path)
+    {
+        using var input = File.OpenRead(path);
+        using var brotli = new BrotliStream(input, CompressionMode.Decompress);
+        var output = new MemoryStream();
+        brotli.CopyTo(output);
+        output.Position = 0;
+        return output;
+    }
+
+    public static BinaryReader GetDecompressedReader(string path)
+    {
+        var memStream = DecompressToMemory(path);
+        return new BinaryReader(memStream);
+    }
+
+    public static async Task CompressAndSaveAsync(string name)
+    {
+        string replayPath = Path.Combine(MelonEnvironment.UserDataDirectory, "MatchReplays", name);
+        string compressedPath = replayPath + ".br";
+
+        await ReplayFile.CompressAsync(replayPath, compressedPath);
+
+        if (File.Exists(compressedPath))
+        {
+            File.Delete(replayPath);
+            MelonLogger.Msg($"[RumbleAnimator] Compressed and deleted original. Final file: {Path.GetFileName(compressedPath)}");
+        }
+        else
+        {
+            MelonLogger.Warning("[RumbleAnimator] Compression failed - original replay kept.");
+        }
+    }
+
+    public static IEnumerator TryCompressAllReplays()
+    {
+        string dir = Path.Combine(MelonEnvironment.UserDataDirectory, "MatchReplays");
+        var files = Directory.GetFiles(dir, "*.replay");
+
+        List<Task> activeTasks = new();
+        int maxConcurrency = 4;
+
+        foreach (var file in files)
+        {
+            string fileName = Path.GetFileName(file);
+            var task = ReplayFile.CompressAndSaveAsync(fileName);
+            activeTasks.Add(task);
+
+            if (activeTasks.Count >= maxConcurrency)
+            {
+                while (activeTasks.Any(t => !t.IsCompleted))
+                    yield return null;
+
+                activeTasks.RemoveAll(t => t.IsCompleted);
+            }
+        }
+
+        while (activeTasks.Any(t => !t.IsCompleted))
+            yield return null;
+
+        MelonLogger.Msg($"[RumbleAnimator] Finished compressing all replays.");
     }
 
     public static string GenerateReplayFormat(int playerCount, string opponent = null)
@@ -86,21 +163,17 @@ public class ReplayFile
         ReplayWriter.Write(magicBytes);
 
         string localPlayer = Calls.Players.GetLocalPlayer().Data.GeneralData.PublicUsername;
-        string hostPlayer = null;
-        
-        var orderedPlayers = Calls.Players.GetPlayersInActorNoOrder();
-        if (orderedPlayers.Count > 0)
-            hostPlayer = orderedPlayers[0].Data.GeneralData.PublicUsername;
+        string hostPlayer = Calls.Players.GetPlayerByActorNo(PhotonNetwork.MasterClient?.ActorNumber ?? -1)?.Data?.GeneralData?.PublicUsername;
 
         var header = new ReplayHeader
         {
             Scene = Utilities.GetFriendlySceneName(),
             Date = DateTime.UtcNow.ToString("yyyy/MM/dd HH:mm:ss"),
 
-            LocalPlayer = localPlayer,
-            opponent = opponentName,
+            LocalPlayer = Utilities.FixColorTags(localPlayer),
+            opponent = Utilities.FixColorTags(opponentName),
 
-            HostPlayer = hostPlayer,
+            HostPlayer = Utilities.FixColorTags(hostPlayer),
 
             playerCount = Calls.Players.GetAllPlayers().Count
         };
@@ -121,7 +194,7 @@ public class ReplayFile
         MelonLogger.Msg($"[RumbleAnimator] Replay file created at {path}");
     }
 
-    public static ReplayHeader GetHeaderFromFile(string path, FileStream stream, BinaryReader reader)
+    public static ReplayHeader GetHeaderFromFile(string path, BinaryReader reader)
     {
         if (!File.Exists(path))
         {
@@ -140,16 +213,37 @@ public class ReplayFile
         string jsonheader = Encoding.UTF8.GetString(reader.ReadBytes(headerLength));
         return JsonConvert.DeserializeObject<ReplayHeader>(jsonheader);
     }
-
-    public static (Dictionary<string, PlayerReplayState>, List<List<StructureFrame>>) GetReplayFromFile(string path)
+    
+    public static void WithReplayReader(string path, Action<BinaryReader> readAction)
     {
-        var players = new Dictionary<string, PlayerReplayState>();
-        var structureFrames = new List<List<StructureFrame>>();
-        
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
-        using var reader = new BinaryReader(stream);
-        
-        var header = GetHeaderFromFile(path, stream, reader);
+        if (!File.Exists(path))
+        {
+            MelonLogger.Warning($"[ReplayIO] File not found: {path}");
+            return;
+        }
+
+        if (path.EndsWith(".br"))
+        {
+            using var file   = new FileStream(path, FileMode.Open, FileAccess.Read);
+            using var brotli = new BrotliStream(file, CompressionMode.Decompress);
+            using var reader = new BinaryReader(brotli);
+            readAction(reader);
+        }
+        else
+        {
+            using var file   = new FileStream(path, FileMode.Open, FileAccess.Read);
+            using var reader = new BinaryReader(file);
+            readAction(reader);
+        }
+    }
+
+    public static void ParseReplay(
+        BinaryReader reader,
+        string path,
+        Dictionary<string, PlayerReplayState> players,
+        List<StructureReplayData> structureFrames)
+    {
+        var header = GetHeaderFromFile(path, reader);
 
         MelonLogger.Msg($"[RumbleAnimator] Loaded replay from scene: {header.Scene}, date: {header.Date}");
 
@@ -177,13 +271,33 @@ public class ReplayFile
                 case FrameType.StructureUpdate:
                     Codec.DecodeStructureFrame(data, structureFrames);
                     break;
+                
+                case FrameType.StructureDestroyed:
+                    Codec.DecodeStructureDestroyed(data, structureFrames);
+                    break;
 
                 default:
                     MelonLogger.Warning($"[RumbleAnimator] Unknown frame type: {frameType}");
                     break;
             }
         }
+    }
 
-        return (players, structureFrames);
+    public static (Dictionary<string, PlayerReplayState>, List<StructureReplayData>, ReplayHeader header) GetReplayFromFile(string path)
+    {
+        if (!path.EndsWith(".br") && File.Exists(path + ".br"))
+            path += ".br";
+        
+        var players = new Dictionary<string, PlayerReplayState>();
+        var structureFrames = new List<StructureReplayData>();
+        ReplayHeader header = null;
+
+        WithReplayReader(path, reader =>
+        {
+            ParseReplay(reader, path, players, structureFrames);
+            header = GetHeaderFromFile(path, reader);
+        });
+
+        return (players, structureFrames, header);
     }
 }

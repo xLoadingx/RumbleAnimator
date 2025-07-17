@@ -324,19 +324,6 @@ public class SlabBuilder
         playButton.transform.SetParent(smallerSlabObjects.transform, false);
         playButton.transform.localRotation = Quaternion.Euler(270, 180, 0);
         playButton.transform.localPosition = new Vector3(0, 0.1527f, 0);
-        
-        var playButtonCanvas = new GameObject("Canvas").AddComponent<Canvas>();
-        playButtonCanvas.renderMode = RenderMode.WorldSpace;
-        playButtonCanvas.transform.SetParent(playButton.transform.GetChild(0), false);
-        playButtonCanvas.transform.localPosition = new Vector3(0, 0.0135f, 0);
-        playButtonCanvas.transform.localRotation = Quaternion.Euler(90, 90, 0);
-        playButtonCanvas.transform.localScale = Vector3.one * 0.001f;
-        
-        var playButtonImageGO = new GameObject("NextPageImage");
-        playButtonImageGO.transform.SetParent(nextPageCanvas.transform, false);
-        var playButtonImage = nextPageImageGO.AddComponent<Image>();
-        playButtonImage.sprite = sprite;
-        playButtonImage.color = new Color(0.824f, 0.827f, 0.287f, 1);
 
         IsBuilt = true;
     }

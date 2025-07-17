@@ -1,5 +1,7 @@
 using System.Collections;
 using Il2CppRootMotion.FinalIK;
+using Il2CppRUMBLE.CharacterCreation;
+using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Players;
 using Il2CppRUMBLE.Players.Scaling;
@@ -36,14 +38,11 @@ public class CloneBuilder
         public PlayerController Controller;
     }
 
-    public static CloneInfo BuildClone(Vector3 initialPosition, string visualDataString, string masterID)
+    public static CloneInfo BuildClone(Vector3 initialPosition, string visualDataString, string masterID, int BP, PlayerMeasurement measurement)
     {
-        // PlayerVisualData visualData = PlayerVisualData.FromPlayfabDataString(visualDataString);
-
         Player localPlayer = Calls.Players.GetLocalPlayer();
 
         GameObject clone = GameObject.Instantiate(Calls.Managers.GetPlayerManager().PlayerControllerPrefab.gameObject);
-        clone.transform.position = new Vector3(0, -100, 0);
         PlayerController cloneController = clone.GetComponent<PlayerController>();
 
         clone.transform.position = initialPosition;
@@ -64,10 +63,9 @@ public class CloneBuilder
         var psp = clone.GetComponent<PlayerStackProcessor>();
         psp.Initialize(cloneController);
         psp.activeStackHandles = localPlayer.Controller.GetComponent<PlayerStackProcessor>().activeStackHandles;
-
-        PlayerMeasurement playerMeasurement = Calls.Players.GetLocalPlayer().Data.PlayerMeasurement;
+        
         cloneController.assignedPlayer.Data = localPlayer.Data;
-        cloneController.assignedPlayer.Data.SetMeasurement(playerMeasurement, true);
+        cloneController.assignedPlayer.Data.SetMeasurement(localPlayer.Data.PlayerMeasurement, true);
         cloneController.assignedPlayer.Data.visualData = localPlayer.Data.visualData;
         cloneController.Initialize(cloneController.AssignedPlayer);
 
@@ -114,7 +112,7 @@ public class CloneBuilder
         clone.GetComponent<PlayerMovement>().enabled = false;
 
         MelonCoroutines.Start(VisualReskin(bodyDouble.transform.GetChild(0).GetChild(0).gameObject
-            .GetComponent<SkinnedMeshRenderer>()));
+            .GetComponent<SkinnedMeshRenderer>(), visualDataString, masterID, BP, bodyDouble.GetComponent<PlayerController>(), measurement));
 
         return new CloneInfo
         {
@@ -138,7 +136,7 @@ public class CloneBuilder
         };
     }
 
-    private static IEnumerator VisualReskin(SkinnedMeshRenderer renderer)
+    private static IEnumerator VisualReskin(SkinnedMeshRenderer renderer, string visualDataString, string masterID, int BP, PlayerController BodyDouble, PlayerMeasurement measurement)
     {
         yield return new WaitForSeconds(0.1f);
 
@@ -147,6 +145,31 @@ public class CloneBuilder
         renderer.material = Calls.Players.GetLocalPlayer().Controller.transform.GetChild(0)
             .GetComponent<PlayerVisuals>().NonHeadClippedMaterial;
         renderer.updateWhenOffscreen = true;
+        
+        var visualData = PlayerVisualData.FromPlayfabDataString(visualDataString);
+        var randomID = Guid.NewGuid().ToString();
+        PlayerData clonedData = new PlayerData(
+            new GeneralData
+            {
+                PlayFabMasterId = masterID,
+                PlayFabTitleId = randomID,
+                BattlePoints = BP
+            },
+            Calls.Players.GetLocalPlayer().Data.RedeemedMoves,
+            Calls.Players.GetLocalPlayer().Data.EconomyData,
+            Calls.Players.GetLocalPlayer().Data.EquipedShiftStones,
+            visualData
+        );
+
+        Player clonePlayer = Player.CreateRemotePlayer(clonedData);
+        BodyDouble.assignedPlayer = clonePlayer;
+        clonePlayer.Controller = BodyDouble;
+        PlayerManager.Instance.AllPlayers.Add(clonePlayer);
+
+        clonePlayer.Data.SetMeasurement(measurement, false);
+        CharacterCreationLookupTable.Instance.BakeApplyAndCachePlayerVisuals(randomID, visualData, false);
+        
+        Calls.Players.GetLocalPlayer().Controller.GetProcessorComponent<PlayerVisuals>().Initialize(Calls.Players.GetLocalPlayer().Controller);
 
         MelonLogger.Msg("Rebinding SkinnedMeshRenderer with delayed fix");
     }

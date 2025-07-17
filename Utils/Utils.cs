@@ -1,4 +1,6 @@
 using System.Collections;
+using Il2CppRUMBLE.Players;
+using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppSystem.Text;
 using MelonLoader;
 using NAudio.Wave;
@@ -18,6 +20,11 @@ public static class Utilities
         { "Ring", "Ring" },
         { "Map1", "Pit" },
         { "Pit", "Pit" }
+    };
+
+    public static Dictionary<string, string> ResourceNameToStackMap { get; } = new()
+    {
+
     };
 
     public static string FixColorTags(string input)
@@ -126,7 +133,21 @@ public static class Utilities
                 reader.Dispose();
             }
         }
+    }
+    
+    public static void TeleportPlayer(Player player, Vector3 position)
+    {
+        var resetSystem = player.Controller.GetComponent<PlayerResetSystem>();
+        var photonPlayer = resetSystem?.photonView?.Owner;
+
+        Il2CppSystem.Object[] data =
+        {
+            position.BoxIl2CppObject(),
+            Quaternion.identity.BoxIl2CppObject()
+        };
         
+        if (resetSystem is not null && photonPlayer is not null)
+            resetSystem.photonView.RPC("RPC_RelocatePlayerController", photonPlayer, data);
     }
 
     public static T LoadObjectFromBundle<T>(string bundleName, string name, bool shouldInstantiate = true) where T : Object

@@ -1,3 +1,4 @@
+using Il2CppRUMBLE.Players.Scaling;
 using MelonLoader;
 using RumbleAnimator.Recording;
 
@@ -21,22 +22,35 @@ public class Codec
         WriteQuat(bw, frame.rotations.controllerRot);
     }
 
-    public static void DecodeVisualData(byte[] data, Dictionary<string, PlayerReplayState> players)
+    public static void DecodePlayerData(byte[] data, Dictionary<string, PlayerReplayState> players)
     {
         using var ms = new MemoryStream(data);
         using var br = new BinaryReader(ms);
 
         string masterID = br.ReadString();
         string visualData = br.ReadString();
+        int battlePoints = br.ReadInt32();
+
+        float length = br.ReadSingle();
+        float armSpan = br.ReadSingle();
+
+        PlayerMeasurement measurement = new PlayerMeasurement(length, armSpan);
 
         if (!players.TryGetValue(masterID, out var state))
-            state = new PlayerReplayState(masterID, visualData);
+        {
+            state = new PlayerReplayState(masterID, visualData, battlePoints, measurement);
+        }
         else
+        {
             state.Data.VisualData = visualData;
+            state.Data.BattlePoints = battlePoints;
+            state.Data.Measurement = measurement;
+        }
 
         players[masterID] = state;
     }
 
+    
     public static byte[] EncodePlayerFrame(string masterID, FrameData frameTypes, float timestamp)
     {
         using var ms = new MemoryStream();
@@ -82,7 +96,7 @@ public class Codec
 
         if (!players.TryGetValue(masterID, out var state))
         {
-            state = new PlayerReplayState(masterID, "");
+            state = new PlayerReplayState(masterID, "", 0, PlayerMeasurement.Default);
             players[masterID] = state;
         }
 
@@ -94,8 +108,6 @@ public class Codec
         bw.Write(masterID);
         bw.Write(stackEvent.timestamp);
         bw.Write(stackEvent.stack);
-
-        MelonLogger.Msg($"[Read] StackEvent: time={stackEvent.timestamp}, name='{stackEvent.stack}");
     }
 
     public static void DecodeStackEvent(byte[] data, Dictionary<string, PlayerReplayState> players)
@@ -109,7 +121,7 @@ public class Codec
 
         if (!players.TryGetValue(masterID, out var state))
         {
-            state = new PlayerReplayState(masterID, "");
+            state = new PlayerReplayState(masterID, "", 0, PlayerMeasurement.Default);
             players[masterID] = state;
         }
 
@@ -158,30 +170,33 @@ public class Codec
 
         structures[index].frames.Add(frame);
     }
-
-    public static byte[] EncodeStructureDestroyed(int structureIndex, int destroyedAtFrame)
+    
+    public static byte[] EncodeStructureData(string type, bool existInScene, int index)
     {
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
-        
-        bw.Write(structureIndex);
-        bw.Write(destroyedAtFrame);
-        
+
+        bw.Write(index);
+        bw.Write(type);
+        bw.Write(existInScene);
+
         return ms.ToArray();
     }
 
-    public static void DecodeStructureDestroyed(byte[] data, List<StructureReplayData> structures)
+    public static void DecodeStructureData(byte[] data, List<StructureReplayData> structures)
     {
         using var ms = new MemoryStream(data);
         using var br = new BinaryReader(ms);
 
         int index = br.ReadInt32();
-        int destroyedAtFrame = br.ReadInt32();
+        string type = br.ReadString();
+        bool existInScene = br.ReadBoolean();
         
         while (structures.Count <= index)
             structures.Add(new StructureReplayData());
-        
-        structures[index].destroyedAtFrame = destroyedAtFrame;
+
+        structures[index].type = type;
+        structures[index].existInScene = existInScene;
     }
 
     private static void WriteVec3(BinaryWriter bw, SVector3 vec3)

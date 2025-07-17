@@ -22,8 +22,9 @@ public class SceneOverlayManager
         while (!loadOp.isDone) yield return null;
 
         additiveScene = SceneManager.GetSceneByName(sceneName);
-
-        TeleportAllPlayers(safePosition);
+        
+        foreach (var player in Calls.Players.GetAllPlayers())
+            Utilities.TeleportPlayer(player, safePosition);
 
         onLoaded?.Invoke();
     }
@@ -50,25 +51,8 @@ public class SceneOverlayManager
             }
         }
         
-        TeleportAllPlayers(safePosition);
-    }
-
-    public static void TeleportAllPlayers(Vector3 position)
-    {
         foreach (var player in Calls.Players.GetAllPlayers())
-        {
-            var resetSystem = player.Controller.GetComponent<PlayerResetSystem>();
-            var photonPlayer = resetSystem?.photonView?.Owner;
-
-            Il2CppSystem.Object[] data =
-            {
-                position.BoxIl2CppObject(),
-                Quaternion.identity.BoxIl2CppObject()
-            };
-            
-            if (resetSystem is not null && photonPlayer is not null)
-                resetSystem.photonView.RPC("RPC_RelocatePlayerController", photonPlayer, data);
-        }
+            Utilities.TeleportPlayer(player, safePosition);
     }
 
     public static IEnumerator UnloadReplayScene()

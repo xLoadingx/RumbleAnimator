@@ -2,10 +2,12 @@ using System.Collections;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Players;
+using Il2CppRUMBLE.Pools;
 using MelonLoader;
 using RumbleAnimator.Recording;
 using RumbleAnimator.Utils;
 using UnityEngine;
+using UnityEngine.Events;
 using Stack = Il2CppRUMBLE.MoveSystem.Stack;
 
 namespace RumbleAnimator;
@@ -15,7 +17,6 @@ public class Patches
 {
     public static string lastStackCaller = null;
     public static float lastStackTimestamp = -1;
-    public static string lastStackExecuted;
     
     [HarmonyPatch(typeof(PlayerStackProcessor), nameof(PlayerStackProcessor.Execute))]
     public static class Patch_StackExecute
@@ -23,27 +24,46 @@ public class Patches
         public static void Postfix(PlayerStackProcessor __instance, Stack stack, StackConfiguration overrideConfig)
         {
             var player = __instance?.GetComponent<PlayerController>();
-            if (!player) return;
+            if (!player)
+            {
+                MelonLogger.Msg("[StackExecute] No player found on processor.");
+                return;
+            }
 
             string masterID = player.assignedPlayer.Data.GeneralData.PlayFabMasterId;
             lastStackCaller = masterID;
 
-            var timestamp = Time.time - Main.recordingStartTime;
-            if (Main.isRecording && !__instance.GetComponent<ReplayClone>() && lastStackTimestamp != Time.time - Main.recordingStartTime && lastStackExecuted != stack?.CachedName)
+            float timestamp = Time.time - Main.recordingStartTime;
+            string stackName = stack?.CachedName ?? "null";
+
+            MelonLogger.Msg($"[StackExecute] Stack: {stackName}, Time: {timestamp:F3}");
+
+            bool shouldRecord = Main.isRecording &&
+                                lastStackTimestamp != timestamp;
+
+            MelonLogger.Msg($"[StackExecute] Conditions - Recording: {Main.isRecording}, " +
+                            $"TimeCheck: {lastStackTimestamp != timestamp}");
+
+            if (shouldRecord)
             {
                 lastStackTimestamp = timestamp;
-                lastStackExecuted = stack.CachedName;
-                
+
                 var stackEvent = new StackEvent
                 {
                     timestamp = timestamp,
-                    stack = stack?.CachedName
+                    stack = stackName
                 };
 
                 using var ms = new MemoryStream();
                 using var bw = new BinaryWriter(ms);
                 Codec.EncodeStackEvent(bw, masterID, stackEvent);
                 ReplayFile.WriteFramedData(ms.ToArray(), Main.currentRecordingFrame, FrameType.StackEvent);
+
+                MelonLogger.Msg($"[StackExecute] RECORDED StackEvent: {stackName} at {timestamp:F3} seconds (Frame {Main.currentRecordingFrame})");
+            }
+            else
+            {
+                MelonLogger.Msg($"[StackExecute] Skipped recording stack '{stackName}' at {timestamp:F3}");
             }
         }
     }
@@ -72,41 +92,33 @@ public class Patches
             bool isFromClone = Main.isPlaying &&
                 state != null &&
                 state?.Clone?.RootObject.GetComponent<ReplayClone>() != null;
-
+            
             if (!Main.structures.Contains(__result) && (Main.isRecording || isFromClone))
             {
                 Main.structures.Add(__result);
+
+                if (Main.isRecording)
+                {
+                    var pooled = __result.GetComponent<PooledMonoBehaviour>();
+                    if (pooled is not null)
+                    {
+                        var replayData = new StructureReplayData
+                        {
+                            type = pooled.resourceName,
+                            frames = new List<StructureFrame>()
+                        };
+
+                        Main.structureDataList.Add(replayData);
+
+                        var data = Codec.EncodeStructureData(pooled.resourceName, false, Main.structureDataList.Count);
+                        ReplayFile.WriteFramedData(data, Main.currentRecordingFrame, FrameType.StructureData);
+                    }
+                }
 
                 if (isFromClone)
                 {
                     __result.GetComponent<Rigidbody>().isKinematic = true;
                 }
-            }
-        }
-    }
-
-    [HarmonyPatch(typeof(Structure), nameof(Structure.Kill))]
-    public class Patch_Structure_Kill
-    {
-        public static void Prefix(Structure __instance)
-        {
-            if (!Main.isRecording)
-                return;
-            
-            GameObject go = __instance.gameObject;
-
-            int index = Main.structures.IndexOf(go);
-            if (index is -1 || index >= Main.structureDataList.Count)
-                return;
-
-            var replayData = Main.structureDataList[index];
-            if (replayData.destroyedAtFrame == null)
-            {
-                replayData.destroyedAtFrame = Main.currentRecordingFrame;
-                MelonLogger.Msg($"[Replay] Structure {__instance.name} destroyed at frame {Main.currentRecordingFrame}");
-                
-                var data = Codec.EncodeStructureDestroyed(index, Main.currentRecordingFrame);
-                ReplayFile.WriteFramedData(data, Main.currentRecordingFrame, FrameType.StructureDestroyed);
             }
         }
     }

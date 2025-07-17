@@ -237,7 +237,7 @@ public class ReplayFile
         }
     }
 
-    public static void ParseReplay(
+    public static ReplayHeader ParseReplay(
         BinaryReader reader,
         string path,
         Dictionary<string, PlayerReplayState> players,
@@ -247,40 +247,49 @@ public class ReplayFile
 
         MelonLogger.Msg($"[RumbleAnimator] Loaded replay from scene: {header.Scene}, date: {header.Date}");
 
-        while (reader.BaseStream.Position < reader.BaseStream.Length)
+        while (true)
         {
-            short dataLength = reader.ReadInt16();
-            int frameID = reader.ReadInt32();
-            FrameType frameType = (FrameType)reader.ReadByte();
-            byte[] data = reader.ReadBytes(dataLength);
-
-            switch (frameType)
+            try
             {
-                case FrameType.PlayerUpdate:
-                    Codec.DecodePlayerFrame(data, players);
-                    break;
+                short dataLength = reader.ReadInt16();
+                int frameID = reader.ReadInt32();
+                FrameType frameType = (FrameType)reader.ReadByte();
+                byte[] data = reader.ReadBytes(dataLength);
 
-                case FrameType.StackEvent:
-                    Codec.DecodeStackEvent(data, players);
-                    break;
+                switch (frameType)
+                {
+                    case FrameType.PlayerUpdate:
+                        Codec.DecodePlayerFrame(data, players);
+                        break;
 
-                case FrameType.VisualData:
-                    Codec.DecodeVisualData(data, players);
-                    break;
+                    case FrameType.StackEvent:
+                        Codec.DecodeStackEvent(data, players);
+                        break;
 
-                case FrameType.StructureUpdate:
-                    Codec.DecodeStructureFrame(data, structureFrames);
-                    break;
-                
-                case FrameType.StructureDestroyed:
-                    Codec.DecodeStructureDestroyed(data, structureFrames);
-                    break;
+                    case FrameType.PlayerData:
+                        Codec.DecodePlayerData(data, players);
+                        break;
 
-                default:
-                    MelonLogger.Warning($"[RumbleAnimator] Unknown frame type: {frameType}");
-                    break;
+                    case FrameType.StructureUpdate:
+                        Codec.DecodeStructureFrame(data, structureFrames);
+                        break;
+                    
+                    case FrameType.StructureData:
+                        Codec.DecodeStructureData(data, structureFrames);
+                        break;
+
+                    default:
+                        MelonLogger.Warning($"[RumbleAnimator] Unknown frame type: {frameType}");
+                        break;
+                }
+            }
+            catch (EndOfStreamException)
+            {
+                break;
             }
         }
+
+        return header;
     }
 
     public static (Dictionary<string, PlayerReplayState>, List<StructureReplayData>, ReplayHeader header) GetReplayFromFile(string path)
@@ -294,10 +303,36 @@ public class ReplayFile
 
         WithReplayReader(path, reader =>
         {
-            ParseReplay(reader, path, players, structureFrames);
-            header = GetHeaderFromFile(path, reader);
+            header = ParseReplay(reader, path, players, structureFrames);
         });
 
         return (players, structureFrames, header);
+    }
+
+    public static void DebugDump(string path)
+    {
+        WithReplayReader(path, reader =>
+        {
+            var header = GetHeaderFromFile(path, reader);
+
+            MelonLogger.Msg($"[RumbleAnimator] Loaded replay from scene: {header.Scene}, date: {header.Date}");
+
+            while (true)
+            {
+                try
+                {
+                    short dataLength = reader.ReadInt16();
+                    int frameID = reader.ReadInt32();
+                    FrameType frameType = (FrameType)reader.ReadByte();
+                    byte[] data = reader.ReadBytes(dataLength);
+                    
+                    MelonLogger.Msg($"[Dump] Frame {frameID} | Type: {frameType} | Size: {dataLength}");
+                }
+                catch (EndOfStreamException)
+                {
+                    break;
+                }
+            }
+        });
     }
 }

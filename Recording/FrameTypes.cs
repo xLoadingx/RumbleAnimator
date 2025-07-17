@@ -6,8 +6,8 @@ public enum FrameType
     PlayerUpdate = 0,
     StackEvent = 1,
     StructureUpdate = 2,
-    VisualData = 3,
-    StructureDestroyed = 5
+    StructureData = 3,
+    PlayerData = 4
 }
 
 [Serializable]
@@ -36,9 +36,11 @@ public struct StructureFrame
 [Serializable]
 public class StructureReplayData
 {
+    public string type;
+    public bool existInScene;
     public List<StructureFrame> frames = new();
-    public int? destroyedAtFrame = null;
     public int CurrentFrameIndex = 0;
+    public bool isActive;
 }
 
 [Serializable]

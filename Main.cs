@@ -1,14 +1,18 @@
-﻿using System.Reflection;
+﻿using System.Collections;
+using System.Reflection;
+using Il2Cpp;
 using Il2CppExitGames.Client.Photon;
 using Il2CppPhoton.Pun;
 using Il2CppPhoton.Realtime;
+using Il2CppRUMBLE.Managers;
 using MelonLoader;
 using UnityEngine;
 using Il2CppRUMBLE.MoveSystem;
+using Il2CppRUMBLE.Networking;
 using Il2CppRUMBLE.Players;
+using Il2CppRUMBLE.Players.Scaling;
 using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppRUMBLE.Pools;
-using Il2CppSystem.Collections;
 using MelonLoader.Utils;
 using RumbleModdingAPI;
 using RumbleModUI;
@@ -17,6 +21,8 @@ using Stack = Il2CppRUMBLE.MoveSystem.Stack;
 using RumbleAnimator.Recording;
 using RumbleAnimator.Utils;
 using UnityEngine.Events;
+using UnityEngine.VFX;
+using Hashtable = Il2CppExitGames.Client.Photon.Hashtable;
 
 [assembly:
     MelonInfo(typeof(RumbleAnimator.Main), RumbleAnimator.BuildInfo.Name, RumbleAnimator.BuildInfo.Version,
@@ -52,7 +58,7 @@ namespace RumbleAnimator
 
         public static List<GameObject> structures = new();
         public static List<StructureReplayData> structureDataList = new();
-        public Dictionary<GameObject, UnityAction> destructionHooks = new();
+        public static Dictionary<GameObject, UnityAction> destructionHooks = new();
         public static bool initializedStructureTracking = false;
 
         private HashSet<string> recordedVisuals = new();
@@ -63,6 +69,7 @@ namespace RumbleAnimator
         public static float playbackStartTime;
 
         public static int currentRecordingFrame = 0;
+        public static int currentPlaybackFrame = 0;
 
         private GameObject recordingRing;
 
@@ -90,9 +97,18 @@ namespace RumbleAnimator
             HarmonyInstance.PatchAll();
             UI.instance.UI_Initialized += OnUIInit;
             Calls.onMapInitialized += Initialize;
-            PhotonNetwork.NetworkingClient.EventReceived += (Action<EventData>)OnEvent;
+            MelonCoroutines.Start(WaitForPhoton());
 
             ModAssembly = MelonAssembly.Assembly;
+        }
+        
+        private IEnumerator WaitForPhoton() 
+        {
+            while (PhotonNetwork.NetworkingClient is null)
+                yield return null;
+            
+            MelonLogger.Msg($"[RumbleAnimator] PhotonNetwork is ready. Hooking EventReceived.");
+            PhotonNetwork.NetworkingClient.EventReceived += (Action<EventData>)OnEvent;
         }
 
         public void Initialize()
@@ -114,7 +130,7 @@ namespace RumbleAnimator
 
             if (currentScene is "Park" && !(bool)AutoRecordParks.SavedValue)
             {
-                Il2CppExitGames.Client.Photon.Hashtable props = new()
+                Hashtable props = new()
                 {
                     ["hasReplayMod"] = true
                 };
@@ -155,17 +171,13 @@ namespace RumbleAnimator
             if (!isRecording)
             {
                 MelonLogger.Msg("[RumbleAnimator] Recording");
+                MelonLogger.Msg($"Scene: {Utilities.GetFriendlySceneName()}");
+                if (Calls.Players.GetEnemyPlayers().FirstOrDefault() is not null)
+                    MelonLogger.Msg($"Opponent: {Utilities.TrimPlayerName(Calls.Players.GetEnemyPlayers().FirstOrDefault().Data.GeneralData.PublicUsername)}");
+                MelonLogger.Msg($"Time: {DateTime.UtcNow:yyyy/MM/dd HH:mm:ss}");
+                MelonLogger.Msg($"Player Count: {Calls.Players.GetAllPlayers().Count}");
 
                 onRecordingStarted?.Invoke(this, null);
-
-                if (recordingRing == null)
-                    InitializeRecordingBracelet();
-
-                recordingRing?.SetActive(true);
-
-                if (recordingRing != null &&
-                    recordingRing.TryGetComponent(out Components.RecordingRingVisuals visuals))
-                    visuals.shouldPulse = true;
 
                 MelonCoroutines.Start(Utilities.PlaySound("Slab_Textchange.wav"));
 
@@ -173,6 +185,9 @@ namespace RumbleAnimator
                     SlabBuilder.mainSlabDestroy.Disable();
 
                 players.Clear();
+                structures.Clear();
+                structureDataList.Clear();
+                recordedVisuals.Clear();
                 recordingStartTime = Time.time;
                 ReplayFile.InitializeReplayFile();
 
@@ -185,19 +200,13 @@ namespace RumbleAnimator
 
                 ReplayFile.ReplayWriter?.Close();
                 ReplayFile.ReplayWriter = null;
-
+                
                 initializedStructureTracking = false;
                 onRecordingStopped?.Invoke(this, null);
 
                 MelonCoroutines.Start(Utilities.PlaySound("Slab_Dismiss.wav"));
 
                 MelonLogger.Msg("[RumbleAnimator] Recording stopped and file saved.");
-
-                if (recordingRing != null)
-                {
-                    recordingRing.GetComponent<Components.RecordingRingVisuals>().shouldPulse = false;
-                    recordingRing?.SetActive(false);
-                }
 
                 _ = ReplayFile.CompressAndSaveAsync(ReplayFile.FileName);
                 isRecording = false;
@@ -206,8 +215,19 @@ namespace RumbleAnimator
 
         public override void OnUpdate()
         {
+            // TODO:
+            // Make Vfx frame and make it parent to the structure, if it had one (maybe)
+            // Make sound work.
+            
             if (currentScene is "Loader")
                 return;
+
+            if (Input.GetKeyDown(KeyCode.F))
+                CloneBuilder.BuildClone(Vector3.zero,
+                    "0:e1,e35,e49,e97,e73,e114,e135,e148,e166,e197,e197,e187,e187,e187,e66,e66,e251,e66,e66:l1,d4,a2,a3,f0,f3,g2,b0,b1,i93,i77,i74,i71,i69,i64,i90:i98,i113,i98,i101,i102,i107,i108:i15,i19,i19,i19,i19,i55,i55,i55,i55,i55:9,0,0,0,0,1,1,0,0,0:i34,m44,m6",
+                    Calls.Players.GetLocalPlayer().Data.GeneralData.PlayFabMasterId,
+                    Calls.Players.GetLocalPlayer().Data.GeneralData.BattlePoints,
+                    Calls.Players.GetLocalPlayer().Data.PlayerMeasurement);
 
             bool joystickR = Calls.ControllerMap.RightController.GetJoystickClick() is 1f;
             bool joystickL = Calls.ControllerMap.LeftController.GetJoystickClick() is 1f;
@@ -232,7 +252,7 @@ namespace RumbleAnimator
                 SlabBuilder.ShowSlab();
         }
 
-        public void OnEvent(EventData eventData)
+        public static void OnEvent(EventData eventData)
         {
             if (eventData.Code is not 59) return;
 
@@ -264,15 +284,63 @@ namespace RumbleAnimator
                 players = loadedPlayerData;
                 structureDataList = loadedStructureFrames;
 
+                foreach (var existing in GameObject.FindObjectsOfType<Structure>())
+                {
+                    if (!existing.isInPool)
+                        existing.Kill(playSFX: false, playVFX: false);
+                }
+                structures.Clear();
+
+                bool hasStructureData = structureDataList.Any(s => s.type != null);
+
+                if (!hasStructureData)
+                {
+                    MelonLogger.Error($"[RumbleAnimator] File '{path}' does not have any structure data.");
+                    return;
+                }
+
+                for (int i = 0; i < structureDataList.Count; i++)
+                {
+                    var replayData = structureDataList[i];
+
+                    if (string.IsNullOrEmpty(replayData.type))
+                    {
+                        MelonLogger.Warning($"[Replay] Missing type for structure index {i}, skipping instantiation.");
+                        continue;
+                    }
+
+                    var pool = PoolManager.Instance.availablePools.FirstOrDefault(name =>
+                        name.poolItem.resourceName == replayData.type);
+
+                    if (pool is null)
+                    {
+                        MelonLogger.Warning($"[Replay] Could not find pool for type '{replayData.type}'");
+                        continue;
+                    }
+                    
+                    PooledMonoBehaviour structure = pool.FetchFromPool(new Vector3(0, 1, 0), Quaternion.identity);
+                    GameObject.Destroy(structure.GetComponent<NetworkGameObject>());
+                    structure.GetComponent<Structure>().OnFetchFromPool();
+                    structure.GetComponent<Structure>().indistructable = true;
+                    structure.GetComponent<Structure>().isInPool = false;
+                    structure.GetComponent<Rigidbody>().isKinematic = true;
+                    structure.gameObject.transform.position = new Vector3(0, -1f, 0);
+
+                    structures.Add(structure.gameObject);
+                }
+                
+                MelonLogger.Msg($"StructureDataList contains {structureDataList.Count} structures");
+
                 MelonLogger.Msg($"[Replay] Playing file {Path.GetFileNameWithoutExtension(path)}");
+                
                 playbackStartTime = Time.time;
 
-                onPlaybackStarted.Invoke(path);
+                onPlaybackStarted?.Invoke(path);
                 isPlaying = true;
             }
             
             // Private park
-            if (currentScene is "Park" && !PhotonNetwork.CurrentRoom.IsVisible)
+            if (currentScene is "Park" && !PhotonNetwork.CurrentRoom.IsVisible && header.Scene is not "Park")
             {
                 if (PhotonNetwork.IsMasterClient)
                 {
@@ -300,22 +368,22 @@ namespace RumbleAnimator
                     }
                 }
                 
-                if (header.Scene != "Custom")
-                {
-                    MelonCoroutines.Start(SceneOverlayManager.LoadSceneForReplay(
-                        header.Scene,
-                        new Vector3(0, 2, 0),
-                        StartPlayback
-                    ));
-                    return;
-                }
-                
-                if (header.Meta.TryGetValue("customMapName", out var mapName))
-                {
-                    SceneOverlayManager.LoadCustomMap(mapName.ToString(), new Vector3(0, 2, 0));
-                    StartPlayback();
-                    return;
-                }
+                // if (header.Scene != "Custom")
+                // {
+                //     MelonCoroutines.Start(SceneOverlayManager.LoadSceneForReplay(
+                //         header.Scene,
+                //         new Vector3(0, 2, 0),
+                //         StartPlayback
+                //     ));
+                //     return;
+                // }
+                //
+                // if (header.Meta.TryGetValue("customMapName", out var mapName))
+                // {
+                //     SceneOverlayManager.LoadCustomMap(mapName.ToString(), new Vector3(0, 2, 0));
+                //     StartPlayback();
+                //     return;
+                // }
             }
             
             StartPlayback();
@@ -366,17 +434,23 @@ namespace RumbleAnimator
 
                     if (!players.TryGetValue(masterID, out var state))
                     {
-                        state = new PlayerReplayState(masterID, player.Data.VisualData.ToPlayfabDataString());
+                        state = new PlayerReplayState(masterID, player.Data.VisualData.ToPlayfabDataString(), player.Data.GeneralData.BattlePoints, player.Data.PlayerMeasurement);
                         players[masterID] = state;
                     }
 
-                    if (recordedVisuals.Add(masterID))
+                    string visual = player.Data.VisualData.ToPlayfabDataString();
+                    if (!recordedVisuals.Contains(masterID) && !string.IsNullOrEmpty(visual))
                     {
+                        recordedVisuals.Add(masterID);
+
                         using var ms = new MemoryStream();
                         using var bw = new BinaryWriter(ms);
                         bw.Write(masterID);
-                        bw.Write(state.Data.VisualData);
-                        ReplayFile.WriteFramedData(ms.ToArray(), currentRecordingFrame, FrameType.VisualData);
+                        bw.Write(visual);
+                        bw.Write(state.Data.BattlePoints);
+                        bw.Write(state.Data.Measurement.Length);
+                        bw.Write(state.Data.Measurement.ArmSpan);
+                        ReplayFile.WriteFramedData(ms.ToArray(), currentRecordingFrame, FrameType.PlayerData);
                     }
 
                     Transform playerController = player.Controller.transform;
@@ -426,12 +500,24 @@ namespace RumbleAnimator
                         if (go.GetComponent<PooledMonoBehaviour>().isInPool || structures.Contains(go))
                             continue;
 
+                        var pooled = go.GetComponent<PooledMonoBehaviour>();
+                        var replayData = new StructureReplayData
+                        {
+                            type = pooled.resourceName,
+                            existInScene = true
+                        };
+
                         structures.Add(go);
 
                         while (structureDataList.Count <= structures.IndexOf(go))
-                            structureDataList.Add(new StructureReplayData());
+                            structureDataList.Add(null);
 
-                        MelonLogger.Msg($"[Replay] Registered pre-existing structure: {go.name}");
+                        structureDataList[structures.IndexOf(go)] = replayData;
+
+                        var data = Codec.EncodeStructureData(pooled.resourceName, true, structures.IndexOf(go));
+                        ReplayFile.WriteFramedData(data, currentRecordingFrame, FrameType.StructureData);
+
+                        MelonLogger.Msg($"[Replay] Registered pre-existing structure: {go.name} with type {pooled.resourceName}");
                     }
 
                     initializedStructureTracking = true;
@@ -444,19 +530,56 @@ namespace RumbleAnimator
                     if (structure == null ||
                         !structure.TryGetComponent(out Structure component) ||
                         structure.name.StartsWith("Static Target") ||
-                        structure.name.StartsWith("Moving Target") ||
-                        component.isSpawning)
+                        structure.name.StartsWith("Moving Target"))
                         continue;
-
+                    
                     while (structureDataList.Count <= i)
-                        structureDataList.Add(new StructureReplayData());
+                    {
+                        var pooled = structure.GetComponent<PooledMonoBehaviour>();
+                        var type = pooled.resourceName;
+
+                        structureDataList.Add(new StructureReplayData
+                        {
+                            type = type
+                        });
+
+                        var typeData = Codec.EncodeStructureData(type, false, i);
+                        ReplayFile.WriteFramedData(typeData, currentRecordingFrame, FrameType.StructureData);
+                    }
 
                     var replayData = structureDataList[i];
                     var frames = replayData.frames ??= new List<StructureFrame>();
-
+                    
                     if (frames.Count > 0)
                     {
                         var prevFrame = frames[^1];
+
+                        if (!component.isInPool && !replayData.isActive)
+                        {
+                            replayData.isActive = true;
+                            MelonLogger.Msg($"Structure {replayData.type} new lifetime at frame {currentRecordingFrame}");
+                        }
+
+                        if (component.isInPool && replayData.isActive)
+                        {
+                            replayData.isActive = false;
+                            
+                            MelonLogger.Msg($"Structure {replayData.type} destroyed at frame {currentRecordingFrame}");
+                            
+                            var destroyedTimestamp = Time.time - recordingStartTime;
+                            var hiddenFrame = new StructureFrame
+                            {
+                                timestamp = destroyedTimestamp,
+                                position = new SVector3(new Vector3(0, -100f, 0)),
+                                rotation = new SQuaternion(Quaternion.identity)
+                            };
+                            frames.Add(hiddenFrame);
+                            
+                            var hiddenData = Codec.EncodeStructureFrame(hiddenFrame, i, destroyedTimestamp);
+                            ReplayFile.WriteFramedData(hiddenData, currentRecordingFrame, FrameType.StructureUpdate);
+                            continue;
+                        }
+                        
                         bool changed = Utilities.HasTransformChanged(
                             structure.transform.position, structure.transform.rotation,
                             prevFrame.position.ToVector3(), prevFrame.rotation.ToQuaternion());
@@ -484,6 +607,8 @@ namespace RumbleAnimator
                     ReplayFile.ReplayWriter.Write(_writeBuffer.ToArray());
                     _writeBuffer.Clear();
                 }
+
+                currentRecordingFrame++;
             }
 
             if (isPlaying)
@@ -500,8 +625,13 @@ namespace RumbleAnimator
                         return;
                     }
 
-                    state.Clone ??= CloneBuilder.BuildClone(
-                        state.Data.Frames[0].positions.controllerPos.ToVector3(), state.Data.VisualData, masterID);
+                    if (state.Clone is null)
+                    {
+                        Utilities.TeleportPlayer(Calls.Players.GetLocalPlayer(), Vector3.zero);
+                        state.Clone = CloneBuilder.BuildClone(
+                            state.Data.Frames[0].positions.controllerPos.ToVector3(), state.Data.VisualData, masterID, state.Data.BattlePoints, state.Data.Measurement);
+                    }
+                    
 
                     var currentClone = state.Clone;
                     int currentPlayerFrame = state.CurrentPlayerFrameIndex;
@@ -514,12 +644,20 @@ namespace RumbleAnimator
                         if (players.Count is 0)
                         {
                             isPlaying = false;
+                            isRecording = false;
 
                             foreach (var structure in structures)
-                                StopPlaybackForStructure(structure, true);
+                                GameObject.Destroy(structure);
 
                             structures.Clear();
                             structureDataList.Clear();
+                            players.Clear();
+                            destructionHooks.Clear();
+                            initializedStructureTracking = false;
+                            playbackStartTime = 0f;
+                            currentRecordingFrame = 0;
+                            currentPlaybackFrame = 0;
+                            
                             var playerController = Calls.Players.GetLocalPlayer().Controller.transform;
                             playerController.GetChild(0).GetComponent<PlayerVisuals>()
                                 .Initialize(playerController.GetComponent<PlayerController>());
@@ -543,71 +681,92 @@ namespace RumbleAnimator
                     if (state.CurrentStackFrameIndex < state.Data.StackEvents.Count)
                     {
                         var stackFrame = state.Data.StackEvents[currentStackFrame];
-
+                    
                         if (time >= stackFrame.timestamp)
                         {
                             Stack stack = null;
-
+                    
                             foreach (var availableStack in Calls.Players.GetLocalPlayer().Controller
                                          .GetComponent<PlayerStackProcessor>().availableStacks)
                             {
+                                if (stackFrame.stack.Contains("Spawn") || stackFrame.stack is "Disc")
+                                    break;
+                                
                                 if (availableStack.CachedName == stackFrame.stack)
                                 {
                                     stack = availableStack;
                                     break;
                                 }
                             }
-
+                    
                             if (stack != null)
                                 currentClone.StackProcessor.Execute(stack, null);
-
+                    
                             state.CurrentStackFrameIndex++;
                         }
                     }
                 }
-
+                
                 for (int i = 0; i < structures.Count; i++)
                 {
+                    if (i >= structureDataList.Count)
+                    {
+                        MelonLogger.Warning($"[Replay] structureDataList missing index {i}");
+                        continue;
+                    }
+                
                     var structure = structures[i];
+                    if (structure == null)
+                    {
+                        MelonLogger.Warning($"[Replay] structure[{i}] is null");
+                        continue;
+                    }
+                
                     var replayData = structureDataList[i];
+                    if (replayData == null || replayData.frames == null || replayData.frames.Count == 0)
+                    {
+                        MelonLogger.Warning($"[Replay] replayData[{i}] is null or has no frames");
+                        continue;
+                    }
+
+                    var rigid = structure.GetComponent<Rigidbody>();
+                    if (rigid is not null) 
+                    {
+                        if (!rigid.isKinematic)
+                            rigid.isKinematic = true;
+                    }
+                
                     var frames = replayData.frames;
-
-                    if (frames.Count is 0)
-                        continue;
-
-                    if (replayData.destroyedAtFrame.HasValue &&
-                        replayData.CurrentFrameIndex >= replayData.destroyedAtFrame.Value &&
-                        !structure.GetComponent<PooledMonoBehaviour>().IsInPool)
-                    {
-                        StopPlaybackForStructure(structure, true);
-                        continue;
-                    }
-
-                    if (!structure.activeInHierarchy)
-                    {
-                        structure.SetActive(true);
-                        var rb = structure.GetComponent<Rigidbody>();
-                        if (rb != null)
-                            rb.isKinematic = true;
-
-                        foreach (var col in structure.GetComponentsInChildren<Collider>())
-                            col.enabled = false;
-
-                        MelonLogger.Msg($"[Replay] Spawned pre-existing structure: {structure.name}");
-                    }
-
                     StructureFrame? frame = frames.LastOrDefault(f => f.timestamp <= time);
-
+                
                     if (frame.HasValue)
                     {
-                        var tr = structure?.transform;
-                        if (tr is null)
-                            continue;
+                        if (!structure.activeSelf && frame.Value.position.y > -99f)
+                            structure.SetActive(true);
 
-                        structure.transform.SetPositionAndRotation(frame.Value.position.ToVector3(),
-                            frame.Value.rotation.ToQuaternion());
+                        if (replayData.CurrentFrameIndex + 1 < frames.Count)
+                        {
+                            var nextFrame = frames[replayData.CurrentFrameIndex + 1];
+                            if (nextFrame.position.y < -99f)
+                            {
+                                structure.GetComponent<Structure>().Kill();
+                                structure.GetComponent<Structure>().OnFetchFromPool();
+                                structure.GetComponent<Structure>().isInPool = false;
+                            }
+                                
+                        }
+                
+                        var tr = structure.transform;
+                        tr.SetPositionAndRotation(
+                            frame.Value.position.ToVector3(),
+                            frame.Value.rotation.ToQuaternion()
+                        );
+
+                        replayData.CurrentFrameIndex++;
                     }
                 }
+
+                currentPlaybackFrame++;
             }
         }
 
@@ -620,23 +779,6 @@ namespace RumbleAnimator
 
             players.Remove(masterID);
             MelonLogger.Msg($"Replay ended for player {masterID}");
-        }
-
-        private void StopPlaybackForStructure(GameObject structure, bool killInsteadOfPool = false)
-        {
-            var pooled = structure.GetComponent<PooledMonoBehaviour>();
-            var rigid = structure.GetComponent<Rigidbody>();
-
-            if (killInsteadOfPool)
-                structure.GetComponent<Structure>().Kill();
-            else
-                pooled.ReturnToPool();
-
-            if (rigid != null)
-                rigid.isKinematic = false;
-
-            foreach (var collider in structure.GetComponentsInChildren<Collider>())
-                collider.enabled = true;
         }
 
         private void InitializeRecordingBracelet()
@@ -754,13 +896,6 @@ namespace RumbleAnimator
         }
     }
 
-    public class StructureReplayData
-    {
-        public List<StructureFrame> frames;
-        public int? destroyedAtFrame = null;
-        public int CurrentFrameIndex = 0;
-    }
-
     public class PlayerReplayState
     {
         public PlayerReplayData Data;
@@ -768,9 +903,9 @@ namespace RumbleAnimator
         public int CurrentPlayerFrameIndex = 0;
         public int CurrentStackFrameIndex = 0;
 
-        public PlayerReplayState(string masterID, string visualData)
+        public PlayerReplayState(string masterID, string visualData, int battlePoints, PlayerMeasurement measurement)
         {
-            Data = new PlayerReplayData(masterID, visualData);
+            Data = new PlayerReplayData(masterID, visualData, battlePoints, measurement);
         }
     }
 
@@ -781,11 +916,15 @@ namespace RumbleAnimator
         public List<FrameData> Frames = new();
         public List<StackEvent> StackEvents = new();
         public string VisualData;
+        public int BattlePoints;
+        public PlayerMeasurement Measurement;
 
-        public PlayerReplayData(string MasterID, string VisualData)
+        public PlayerReplayData(string MasterID, string VisualData, int battlePoints, PlayerMeasurement measurement)
         {
             this.MasterID = MasterID;
             this.VisualData = VisualData;
+            this.BattlePoints = battlePoints;
+            this.Measurement = measurement;
         }
     }
 

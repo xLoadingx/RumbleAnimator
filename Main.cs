@@ -417,7 +417,6 @@ namespace RumbleAnimator
             GameObject Head = Overall.transform.GetChild(0).GetChild(0).gameObject;
 
             GameObject.Destroy(Overall.GetComponent<NetworkGameObject>());
-            GameObject.Destroy(Overall.GetComponent<PlayerVR>());
             Overall.GetComponent<Rigidbody>().isKinematic = true;
             
             var localTransform = PlayerManager.instance.localPlayer.Controller.transform;

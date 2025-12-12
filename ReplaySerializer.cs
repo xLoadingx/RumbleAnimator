@@ -104,30 +104,69 @@ public class ReplaySerializer
         }
     }
     
-    static void WriteStructureState(BinaryWriter bw, StructureState s)
+    static void WriteStructureChunk(BinaryWriter bw, StructureState s)
     {
-        bw.Write(s.position);
-        bw.Write(s.rotation);
-        bw.Write(s.active);
-        bw.Write(s.grounded);
+        using var ms = new MemoryStream();
+        using var temp = new BinaryWriter(ms);
+        
+        temp.Write((byte)StructureField.position);
+        temp.Write(s.position);
+
+        temp.Write((byte)StructureField.rotation);
+        temp.Write(s.rotation);
+        
+        temp.Write((byte)StructureField.active);
+        temp.Write(s.active);
+        
+        temp.Write((byte)StructureField.grounded);
+        temp.Write(s.grounded);
+
+        byte[] chunk = ms.ToArray();
+        bw.Write(chunk.Length);
+        bw.Write(chunk);
     }
     
-    static void WritePlayerState(BinaryWriter bw, PlayerState p)
+    static void WritePlayerChunk(BinaryWriter bw, PlayerState p)
     {
-        bw.Write(p.VRRigPos);
-        bw.Write(p.VRRigRot);
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
 
-        bw.Write(p.HeadPos);
-        bw.Write(p.HeadRot);
+        w.Write((byte)PlayerField.VRRigPos);
+        w.Write(p.VRRigPos);
 
-        bw.Write(p.LHandPos);
-        bw.Write(p.LHandRot);
+        w.Write((byte)PlayerField.VRRigRot);
+        w.Write(p.VRRigRot);
 
-        bw.Write(p.RHandPos);
-        bw.Write(p.RHandRot);
+        w.Write((byte)PlayerField.LHandPos);
+        w.Write(p.LHandPos);
 
-        bw.Write(p.Health);
-        bw.Write(p.active);
+        w.Write((byte)PlayerField.LHandRot);
+        w.Write(p.LHandRot);
+
+        w.Write((byte)PlayerField.RHandPos);
+        w.Write(p.RHandPos);
+
+        w.Write((byte)PlayerField.RHandRot);
+        w.Write(p.RHandRot);
+
+        w.Write((byte)PlayerField.HeadPos);
+        w.Write(p.HeadPos);
+
+        w.Write((byte)PlayerField.HeadRot);
+        w.Write(p.HeadRot);
+
+        w.Write((byte)PlayerField.currentStack);
+        w.Write(p.currentStack);
+
+        w.Write((byte)PlayerField.Health);
+        w.Write(p.Health);
+
+        w.Write((byte)PlayerField.active);
+        w.Write(p.active);
+
+        var chunk = ms.ToArray();
+        bw.Write(chunk.Length);
+        bw.Write(chunk);
     }
 
     static bool PosChanged(Vector3 a, Vector3 b)
@@ -174,14 +213,7 @@ public class ReplaySerializer
                 
                 for (int i = 0; i < structureCount; i++)
                 {
-                    bool currExists = i < f.Structures.Length;
                     bool prevExists = i < lastStructureFrame.Length;
-
-                    if (!currExists)
-                    {
-                        bw.Write((byte)0);
-                        continue;
-                    }
 
                     var curr = f.Structures[i];
                     var prev = prevExists ? lastStructureFrame[i] : default;
@@ -202,8 +234,9 @@ public class ReplaySerializer
                     }
 
                     bw.Write((byte)(changed ? 1 : 0));
+                    bw.Write((byte)ChunkType.StructureState);
                     if (changed)
-                        WriteStructureState(bw, curr);
+                        WriteStructureChunk(bw, curr);
 
                     if (i < lastStructureFrame.Length)
                         lastStructureFrame[i] = curr;
@@ -213,14 +246,7 @@ public class ReplaySerializer
 
                 for (int i = 0; i < playerCount; i++)
                 {
-                    bool currExists = i < f.Players.Length;
                     bool prevExists = i < lastPlayerFrame.Length;
-
-                    if (!currExists)
-                    {
-                        bw.Write((byte)0);
-                        continue;
-                    }
 
                     var curr = f.Players[i];
                     var prev = prevExists ? lastPlayerFrame[i] : default;
@@ -247,9 +273,9 @@ public class ReplaySerializer
                     }
 
                     bw.Write((byte)(changed ? 1 : 0));
-
+                    bw.Write((byte)ChunkType.PlayerState);
                     if (changed)
-                        WritePlayerState(bw, curr);
+                        WritePlayerChunk(bw, curr);
                     
                     if (i < lastPlayerFrame.Length)
                         lastPlayerFrame[i] = curr;
@@ -356,36 +382,58 @@ public class ReplaySerializer
             
             frame.Structures = new StructureState[structureCount];
             frame.Players = new PlayerState[playerCount];
-
-            for (int s = 0; s < structureCount; s++)
+            
+            int structureIndex = 0;
+            int playerIndex = 0;
+            
+            int total = structureCount + playerCount;
+            
+            for (int i = 0; i < total; i++)
             {
                 byte changed = br.ReadByte();
+                ChunkType type = (ChunkType)br.ReadByte();
 
-                if (changed == 1)
+                switch (type)
                 {
-                    var state = ReadStructureState(br);
-                    frame.Structures[s] = state;
-                    lastStructureStates[s] = state;
-                }
-                else
-                {
-                    frame.Structures[s] = lastStructureStates[s];
-                }
-            }
+                    case ChunkType.StructureState:
+                    {
+                        if (changed == 1)
+                        {
+                            var s = ReadStructureChunk(br);
+                            frame.Structures[structureIndex] = s;
+                            lastStructureStates[structureIndex] = s;
+                        }
+                        else
+                        {
+                            frame.Structures[structureIndex] = lastStructureStates[structureIndex];
+                        }
+                        
+                        structureIndex++;
+                        break;
+                    }
 
-            for (int p = 0; p < playerCount; p++)
-            {
-                byte changed = br.ReadByte();
+                    case ChunkType.PlayerState:
+                    {
+                        if (changed == 1)
+                        {
+                            var p = ReadPlayerChunk(br);
+                            frame.Players[playerIndex] = p;
+                            lastPlayerStates[playerIndex] = p;
+                        }
+                        else
+                        {
+                            frame.Players[playerIndex] = lastPlayerStates[playerIndex];
+                        }
 
-                if (changed == 1)
-                {
-                    var state = ReadPlayerState(br);
-                    frame.Players[p] = state;
-                    lastPlayerStates[p] = state;
-                }
-                else
-                {
-                    frame.Players[p] = lastPlayerStates[p];
+                        playerIndex++;
+                        break;
+                    }
+                    default:
+                    {
+                        int len = br.ReadInt32();
+                        br.BaseStream.Position += len;
+                        break;
+                    }
                 }
             }
 
@@ -395,37 +443,63 @@ public class ReplaySerializer
         return frames;
     }
 
-    static PlayerState ReadPlayerState(BinaryReader br)
+    static PlayerState ReadPlayerChunk(BinaryReader br)
     {
-        return new PlayerState
+        int len = br.ReadInt32();
+        long end = br.BaseStream.Position + len;
+
+        PlayerState p = new();
+
+        while (br.BaseStream.Position < end)
         {
-            VRRigPos = br.ReadVector3(),
-            VRRigRot = br.ReadQuaternion(),
+            PlayerField id = (PlayerField)br.ReadByte();
 
-            HeadPos = br.ReadVector3(),
-            HeadRot = br.ReadQuaternion(),
+            switch (id)
+            {
+                case PlayerField.VRRigPos: p.VRRigPos = br.ReadVector3(); break;
+                case PlayerField.VRRigRot: p.VRRigRot = br.ReadQuaternion(); break;
+                case PlayerField.LHandPos: p.LHandPos = br.ReadVector3(); break;
+                case PlayerField.LHandRot: p.LHandRot = br.ReadQuaternion(); break;
+                case PlayerField.RHandPos: p.RHandPos = br.ReadVector3(); break;
+                case PlayerField.RHandRot: p.RHandRot = br.ReadQuaternion(); break;
+                case PlayerField.HeadPos: p.HeadPos = br.ReadVector3(); break;
+                case PlayerField.HeadRot: p.HeadRot = br.ReadQuaternion(); break;
+                case PlayerField.currentStack: p.currentStack = br.ReadInt16(); break;
+                case PlayerField.Health: p.Health = br.ReadInt16(); break;
+                case PlayerField.active: p.active = br.ReadBoolean(); break;
+                default:
+                    br.BaseStream.Position = end;
+                    break;
+            }
+        }
 
-            LHandPos = br.ReadVector3(),
-            LHandRot = br.ReadQuaternion(),
-
-            RHandPos = br.ReadVector3(),
-            RHandRot = br.ReadQuaternion(),
-            
-            Health = br.ReadInt16(),
-            active = br.ReadBoolean()
-        };
+        return p;
     }
 
-    static StructureState ReadStructureState(BinaryReader br)
+    static StructureState ReadStructureChunk(BinaryReader br)
     {
-        var state = new StructureState();
+        int len = br.ReadInt32();
+        long end = br.BaseStream.Position + len;
 
-        state.position = br.ReadVector3();
-        state.rotation = br.ReadQuaternion();
-        state.active = br.ReadBoolean();
-        state.grounded = br.ReadBoolean();
+        StructureState s = new();
 
-        return state;
+        while (br.BaseStream.Position < end)
+        {
+            StructureField id = (StructureField)br.ReadByte();
+
+            switch (id)
+            {
+                case StructureField.position: s.position = br.ReadVector3(); break;
+                case StructureField.rotation: s.rotation = br.ReadQuaternion(); break;
+                case StructureField.active: s.active = br.ReadBoolean(); break;
+                case StructureField.grounded: s.grounded = br.ReadBoolean(); break;
+                default:
+                    br.BaseStream.Position = end;
+                    break;
+            }
+        }
+
+        return s;
     }
 
     public static ReplayInfo LoadReplay(string path)
@@ -458,18 +532,22 @@ public struct ReplayInfo
 }
 
 [Serializable]
-public struct PlayerInfo
+public struct Frame
 {
-    public byte ActorId;
-    public string MasterId;
-    
-    public string Name;
-    public int BattlePoints;
-    public string VisualData;
-    public short[] EquippedShiftStones;
-    public PlayerMeasurement Measurement;
+    public float Time;
+    public StructureState[] Structures;
+    public PlayerState[] Players;
+}
 
-    public bool WasHost;
+// ------- Structure State -------
+
+[Serializable]
+public struct StructureState
+{
+    public Vector3 position;
+    public Quaternion rotation;
+    public bool active;
+    public bool grounded;
 }
 
 [Serializable]
@@ -478,6 +556,13 @@ public struct StructureInfo
     public StructureType Type;
 }
 
+public enum StructureField
+{
+    position,
+    rotation,
+    active,
+    grounded
+}
 
 public enum StructureType : byte
 {
@@ -491,22 +576,7 @@ public enum StructureType : byte
     SmallRock
 }
 
-[Serializable]
-public struct Frame
-{
-    public float Time;
-    public StructureState[] Structures;
-    public PlayerState[] Players;
-}
-
-[Serializable]
-public struct StructureState
-{
-    public Vector3 position;
-    public Quaternion rotation;
-    public bool active;
-    public bool grounded;
-}
+// ------- Player State -------
 
 [Serializable]
 public struct PlayerState
@@ -523,7 +593,66 @@ public struct PlayerState
     public Vector3 HeadPos;
     public Quaternion HeadRot;
 
+    public short currentStack;
+
     public short Health;
     public bool active;
+}
+
+[Serializable]
+public struct PlayerInfo
+{
+    public byte ActorId;
+    public string MasterId;
+    
+    public string Name;
+    public int BattlePoints;
+    public string VisualData;
+    public short[] EquippedShiftStones;
+    public PlayerMeasurement Measurement;
+
+    public bool WasHost;
+}
+
+public enum PlayerField : byte {
+    VRRigPos,
+    VRRigRot,
+    
+    LHandPos,
+    LHandRot,
+    
+    RHandPos,
+    RHandRot,
+    
+    HeadPos,
+    HeadRot,
+    
+    currentStack,
+    
+    Health,
+    active
+}
+
+public enum StackType : short {
+    None,
+    Dash,
+    Jump,
+    Flick,
+    Parry,
+    HoldLeft,
+    HoldRight,
+    Ground,
+    Straight,
+    Uppercut,
+    Kick,
+    Explode
+}
+
+// ------------------------
+
+public enum ChunkType : short
+{
+    PlayerState,
+    StructureState
 }
 

@@ -1,0 +1,11 @@
+TODO:
+- Add automatic legacy cam for each player POV
+- Keybinds for frame seeking
+- Add VFX to structures (hold, flick, explode, etc.)
+- Add in-game menu for frame controls
+- Add pedestals for matches
+- Fix replays in parks not loading correctly
+- Fix playback framerate not matching recording framerate
+- Fix legs not being pulled up while in the air
+- Fix client jittering
+- Make file backwards compatible

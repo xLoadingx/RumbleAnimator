@@ -11,6 +11,8 @@ namespace RumbleAnimator;
 
 public class Patches
 {
+    public static List<(string playerId, short stackId)> activations = new();
+    
     [HarmonyPatch(typeof(PoolManager), nameof(PoolManager.Instantiate))]
     public class Patch_PoolManager_Instantiate
     {
@@ -24,7 +26,6 @@ public class Patches
                 Main.instance.Structures.Add(structure);
         }
     }
-    
 
     [HarmonyPatch(typeof(PlayerController), nameof(PlayerController.Initialize))]
     public class Patch_PlayerController_Initialize
@@ -60,6 +61,16 @@ public class Patches
 
             if (Main.instance.MasterIdToIndex.TryGetValue(id, out int idx))
                 Main.instance.RecordedPlayers[idx] = null;
+        }
+    }
+
+    [HarmonyPatch(typeof(PlayerStackProcessor), nameof(PlayerStackProcessor.Execute))]
+    public class Patch_PlayerStackProcessor_Execute
+    {
+        static void Postfix(Stack stack, StackConfiguration overrideConfig, PlayerStackProcessor __instance)
+        {
+            if (Main.instance.NameToStackType.TryGetValue(stack.cachedName, out var type))
+                activations.Add((__instance.ParentController.assignedPlayer.Data.GeneralData.PlayFabMasterId, (short)type));
         }
     }
 }

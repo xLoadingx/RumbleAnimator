@@ -2,12 +2,14 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Il2Cpp;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppPhoton.Pun;
 using Il2CppRUMBLE.Audio;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Networking;
+using Il2CppRUMBLE.Networking.MatchFlow;
 using Il2CppRUMBLE.Players;
 using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppRUMBLE.Pools;
@@ -48,6 +50,21 @@ namespace RumbleAnimator
 
         public List<Player> RecordedPlayers = new();
         public Dictionary<string, int> MasterIdToIndex = new();
+        
+        public Dictionary<string, StackType> NameToStackType = new (StringComparer.OrdinalIgnoreCase)
+        {
+            { "RockSlide", StackType.Dash },
+            { "Jump", StackType.Jump },
+            { "Flick", StackType.Flick },
+            { "Parry", StackType.Parry },
+            { "HoldLeft", StackType.HoldLeft },
+            { "HoldRight", StackType.HoldRight },
+            { "Stomp", StackType.Ground },
+            { "Straight", StackType.Straight },
+            { "Uppercut", StackType.Uppercut },
+            { "Kick", StackType.Kick },
+            { "Explode", StackType.Explode }
+        };
         
         public static List<Frame> Frames = new();
         
@@ -354,10 +371,25 @@ namespace RumbleAnimator
             
             PlaybackPlayers = null;
 
-            MelonCoroutines.Start(SpawnClones());
+            if (currentReplay.Header.Scene is "Map0" or "Map1")
+            {
+                MelonCoroutines.Start(DoMatchStart());
+
+                IEnumerator DoMatchStart()
+                {
+                    MatchHandler.instance.DoStartCountdown();
+                    yield return new WaitForSeconds(10f);
+                    MatchHandler.instance.FadeInCombatMusic();
+                }
+            }
+            
+            MelonCoroutines.Start(SpawnClones(() =>
+            {
+                isPlaying = true;
+            }));
         }
 
-        private IEnumerator SpawnClones()
+        private IEnumerator SpawnClones(Action done = null)
         {
             PlaybackPlayers = new Clone[currentReplay.Header.Players.Length];
             replayPlayers = new GameObject("Replay Players");
@@ -370,6 +402,8 @@ namespace RumbleAnimator
                 PlaybackPlayers[i] = temp;
                 temp.Controller.transform.SetParent(replayPlayers.transform);
             }
+            
+            done?.Invoke();
         }
 
         public static IEnumerator BuildClone(PlayerInfo pInfo, Action<Clone> Callback, Vector3 initialPosition = default)
@@ -463,6 +497,8 @@ namespace RumbleAnimator
                     PlayerManager.instance.AllPlayers.Remove(player.Controller.assignedPlayer);
             }
             
+            if (currentReplay.Header.Scene is "Map0" or "Map1")
+                MatchHandler.instance.FadeOutCombatMusic();
             
             PlaybackPlayers = null;
             replayStructures = null;
@@ -551,6 +587,7 @@ namespace RumbleAnimator
                     RHandPos = RHand.localPosition,
                     RHandRot = RHand.localRotation,
                     Health = p.Data.HealthPoints,
+                    currentStack = Patches.activations.FirstOrDefault(s => s.playerId == p.Data.GeneralData.PlayFabMasterId).stackId,
                     active = true
                 };
             }
@@ -562,6 +599,8 @@ namespace RumbleAnimator
                 Players = playerStates
             };
             Frames.Add(frame);
+
+            Patches.activations.Clear();
         }
 
         public void HandlePlayback()
@@ -711,12 +750,27 @@ namespace RumbleAnimator
                     if (pb.Health < pa.Health && pb.Health != 0)
                     {
                         var hitmarker = PoolManager.instance.GetPool("PlayerHitmarker")
-                            .FetchFromPool(playbackPlayer.VRRig.transform.position, Quaternion.identity)
+                            .FetchFromPool(playbackPlayer.VRRig.transform.position + new Vector3(0, 0.5f, 0), Quaternion.identity)
                             .Cast<PlayerHitmarker>();
 
                         hitmarker.SetDamage(pa.Health - pb.Health);
+                        hitmarker.gameObject.SetActive(true);
                         hitmarker.Play();
                     }
+                }
+
+                if (pa.currentStack != (short)StackType.None && pa.currentStack != pb.currentStack)
+                {
+                    var key = NameToStackType.FirstOrDefault(s => s.Value == (StackType)pa.currentStack);
+
+                    var stack = playbackPlayer.Controller
+                        .GetSubsystem<PlayerStackProcessor>()
+                        .availableStacks.ToArray()
+                        .FirstOrDefault(s => s.cachedName == key.Key);
+
+                    playbackPlayer.Controller
+                        .GetSubsystem<PlayerStackProcessor>()
+                        .Execute(stack);
                 }
                 
                 if (!playbackPlayer.Controller.gameObject.activeSelf)

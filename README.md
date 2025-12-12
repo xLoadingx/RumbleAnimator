@@ -5,6 +5,7 @@ TODO:
 - Add in-game menu for frame controls
 - Add pedestals for matches
 - Fix replays in parks not loading correctly
+- Fix players who joined later in the recording to not be added to the recording
 - Fix playback framerate not matching recording framerate
 - Fix legs not being pulled up while in the air
 - Fix client jittering

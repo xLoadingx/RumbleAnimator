@@ -1,5 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
     <PropertyGroup>
         <TargetFramework>net6.0</TargetFramework>
         <LangVersion>latest</LangVersion>
@@ -8,104 +7,16 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <Reference Include="0Harmony">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\net6\0Harmony.dll</HintPath>
-      </Reference>
-      <Reference Include="Il2CppBucketheadEntertainment.Plugins">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppBucketheadEntertainment.Plugins.dll</HintPath>
-      </Reference>
-      <Reference Include="Il2CppInterop.Runtime">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\net6\Il2CppInterop.Runtime.dll</HintPath>
-      </Reference>
-      <Reference Include="Il2Cppmscorlib">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2Cppmscorlib.dll</HintPath>
-      </Reference>
-      <Reference Include="Il2CppPhoton3Unity3D">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppPhoton3Unity3D.dll</HintPath>
-      </Reference>
-      <Reference Include="Il2CppPhotonRealtime">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppPhotonRealtime.dll</HintPath>
-      </Reference>
-      <Reference Include="Il2CppPhotonUnityNetworking">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppPhotonUnityNetworking.dll</HintPath>
-      </Reference>
-      <Reference Include="Il2CppRUMBLE.Plugins">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppRUMBLE.Plugins.dll</HintPath>
-      </Reference>
-      <Reference Include="Il2CppRUMBLE.Runtime">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppRUMBLE.Runtime.dll</HintPath>
-      </Reference>
-      <Reference Include="Il2CppSystem">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Il2CppSystem.dll</HintPath>
-      </Reference>
-      <Reference Include="MelonLoader">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\net6\MelonLoader.dll</HintPath>
-      </Reference>
-      <Reference Include="ModUI">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\modui.dll</HintPath>
-      </Reference>
-      <Reference Include="NAudio">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\UserLibs\NAudio.dll</HintPath>
-      </Reference>
-      <Reference Include="NAudio.Core">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\UserLibs\NAudio.Core.dll</HintPath>
-      </Reference>
-      <Reference Include="NAudio.WinMM">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\UserLibs\NAudio.WinMM.dll</HintPath>
-      </Reference>
-      <Reference Include="Newtonsoft.Json">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\net6\Newtonsoft.Json.dll</HintPath>
-      </Reference>
-      <Reference Include="RumbleModdingAPI">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\rumblemoddingapi.dll</HintPath>
-      </Reference>
-      <Reference Include="Unity.InputSystem">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Unity.InputSystem.dll</HintPath>
-      </Reference>
-      <Reference Include="Unity.TextMeshPro">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\Unity.TextMeshPro.dll</HintPath>
-      </Reference>
-      <Reference Include="UnityEngine.AnimationModule">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.AnimationModule.dll</HintPath>
-      </Reference>
-      <Reference Include="UnityEngine.AudioModule">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.AudioModule.dll</HintPath>
-      </Reference>
-      <Reference Include="UnityEngine.CoreModule">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.CoreModule.dll</HintPath>
-      </Reference>
-      <Reference Include="UnityEngine.Il2CppAssetBundleManager">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\net6\UnityEngine.Il2CppAssetBundleManager.dll</HintPath>
-      </Reference>
-      <Reference Include="UnityEngine.InputLegacyModule">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.InputLegacyModule.dll</HintPath>
-      </Reference>
-      <Reference Include="UnityEngine.PhysicsModule">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.PhysicsModule.dll</HintPath>
-      </Reference>
-      <Reference Include="UnityEngine.UI">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.UI.dll</HintPath>
-      </Reference>
-      <Reference Include="UnityEngine.UIModule">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.UIModule.dll</HintPath>
-      </Reference>
-      <Reference Include="UnityEngine.VFXModule">
-        <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\Il2CppAssemblies\UnityEngine.VFXModule.dll</HintPath>
-      </Reference>
-    </ItemGroup>
+    <Reference Include="..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\**\*.dll" Private="false" />
 
-    <ItemGroup>
-      <None Remove="AssetBundles\bracelet" />
-      <None Remove="AssetBundles\audio" />
-      <None Remove="AssetBundles\replaysettingsmeshes" />
+    <Reference Include="RumbleModdingAPI">
+      <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\rumblemoddingapi.dll</HintPath>
+    </Reference>
     </ItemGroup>
-
+  
     <ItemGroup>
-      <None Remove="Audio\Slab_Dismiss.wav" />
-      <None Remove="Audio\Ricochet.wav" />
-      <None Remove="Audio\Slab_Contstruct.wav" />
-      <None Remove="Audio\Slab_Textchange.wav" />
-      <None Remove="Audio\Pedestal_Rise.wav" />
+      <PackageReference Include="LavaGang.MelonLoader" Version="0.7.1" />
+      <PackageReference Include="NAudio" Version="2.2.1" />
     </ItemGroup>
 
     <Target Name="PostBuild" AfterTargets="PostBuildEvent">

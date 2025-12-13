@@ -154,7 +154,7 @@ Each field is encoded as:
     byte FieldSize
     bytes FieldValue[FieldSize]
 
-Fields may appear in any order, but keep the defined field values the same order as described below for each state.  
+Fields may appear in any order, but the defined field enum values must keep the same order as described below for each state.  
 Unknown fields must be skipped using `FieldSize`
 
 ---

@@ -103,8 +103,7 @@ The replay consists of `FrameCount` frames written sequentially.
 Each frame is written in the following order:
 
 1. Frame timestamp
-2. Structure state entries
-3. Player state entries
+2. State Entries
 
 ### Timestamp
 
@@ -116,27 +115,26 @@ Time is expressed in seconds since the start of the replay.
 
 ## State Entries
 
-Each structure and each player has exactly one state entry per frame.
-The number and order of entries is fixed for the entire replay.
+Each frame contains only the states that changed relative to the previous frame.  
+Unchanged states reuse the state from the previous frame.
 
-Every state entry begins with:
+Each state entry begins with:
 
-    byte ChangedFlag
     byte ChunkType
+    int32 Index
 
-- `ChangedFlag = 0` means the previous state is reused
-- `ChangedFlag = 1` means a new state chunk follows
-
-`ChunkType` identifies what type of chunk it is:
+`ChunkType` identifies what type of state is being updated:
     
     PlayerState
     StructureState
+
+`Index` refers to the index in the corresponding manifest array (`Players`, `Structures`, etc.)
 
 ---
 
 ## State Chunks
 
-When `ChangedFlag` is 1, the following data is written:
+Each state entry is immediately followed by its chunk data:
 
     int32 ChunkLength
     bytes ChunkData
@@ -149,9 +147,7 @@ Each field is encoded as:
     byte FieldId
     field value
 
-Fields may appear in any order, but keep the defined fields the same order.  
-Fields for each state are defined below
-
+Fields may appear in any order, but keep the defined field values the same order as described below for each state.
 ---
 
 ## StructureState Chunks
@@ -173,17 +169,17 @@ Player state chunks describe the pose and gameplay state of a player.
 
 Defined player fields:
 
-- VRRigPos     → Vector3
-- VRRigRot     → Quaternion
-- LHandPos     → Vector3
-- LHandRot     → Quaternion
-- RHandPos     → Vector3
-- RHandRot     → Quaternion
-- HeadPos      → Vector3
-- HeadRot      → Quaternion
-- currentStack → int16
-- Health       → int16
-- active       → bool
+- VRRigPos -> Vector3
+- VRRigRot -> Quaternion
+- LHandPos -> Vector3
+- LHandRot -> Quaternion
+- RHandPos -> Vector3
+- RHandRot -> Quaternion
+- HeadPos -> Vector3
+- HeadRot -> Quaternion
+- currentStack -> int16
+- Health -> int16
+- active -> bool
 
 ---
 
@@ -191,5 +187,6 @@ Defined player fields:
 
 - Structure index `i` always refers to `Structures[i]` from the manifest
 - Player index `i` always refers to `Players[i]` from the manifest
+- et cetera for each state array defined in `manifest.json`
 
-If `ChangedFlag` is 0, the state from the previous frame at the same index is reused.
+If a state for a given index does not appear in a frame, the state from the previous frame is reused.

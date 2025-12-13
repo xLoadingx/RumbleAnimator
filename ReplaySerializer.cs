@@ -72,41 +72,6 @@ public class ReplaySerializer
         public PlayerInfo[] Players;
         public StructureInfo[] Structures;
     }
-
-    private static void WriteHeader(BinaryWriter bw, ReplayHeader h)
-    {
-        bw.Write(h.Version);
-        bw.Write(h.Scene);
-        bw.Write(h.DateUTC);
-
-        bw.Write(h.FrameCount);
-        bw.Write(h.StructureCount);
-        bw.Write(h.FPS);
-
-        bw.Write(h.Players.Length);
-        foreach (var p in h.Players)
-        {
-            bw.Write(p.ActorId);
-            bw.Write(p.MasterId);
-            bw.Write(p.Name);
-            bw.Write(p.BattlePoints);
-            bw.Write(p.VisualData);
-
-            bw.Write(p.EquippedShiftStones[0]);
-            bw.Write(p.EquippedShiftStones[1]);
-
-            bw.Write(p.Measurement.Length);
-            bw.Write(p.Measurement.ArmSpan);
-            
-            bw.Write(p.WasHost);
-        }
-
-        bw.Write(h.Structures.Length);
-        foreach (var s in h.Structures)
-        {
-            bw.Write((byte)s.Type);
-        }
-    }
     
     static void WriteStructureChunk(BinaryWriter bw, StructureState s)
     {
@@ -191,7 +156,7 @@ public class ReplaySerializer
     {
         try
         {
-            byte[] rawReplay = SerializeReplayFile(replay);
+            byte[] rawReplay = await Task.Run(() => SerializeReplayFile(replay));
 
             byte[] compressedReplay = await Task.Run(() => Compress(rawReplay));
 
@@ -239,8 +204,19 @@ public class ReplaySerializer
         {
             bw.Write(f.Time);
 
+            using var frameMs = new MemoryStream();
+            using var frameBw = new BinaryWriter(frameMs);
+
+            int entryCount = 0;
+
             int structureCount = replay.Header.StructureCount;
             int playerCount = replay.Header.Players.Length;
+            
+            Main.instance.LoggerInstance.Msg(
+                $"[SER] frame start | t={f.Time:F3} | " +
+                $"structs={f.Structures.Length}/{structureCount} | " +
+                $"players={f.Players.Length}/{playerCount}"
+            );
                 
             lastStructureFrame ??= new StructureState[structureCount];
             lastPlayerFrame ??= new PlayerState[playerCount];
@@ -249,88 +225,69 @@ public class ReplaySerializer
                 
             for (int i = 0; i < structureCount; i++)
             {
-                bool currExists = i < f.Structures.Length;
-                bool prevExists = i < lastStructureFrame.Length;
-
-                if (!currExists)
-                {
-                    bw.Write((byte)0);
-                    bw.Write((byte)ChunkType.StructureState);
+                if (i >= f.Structures.Length || i >= lastStructureFrame.Length)
                     continue;
-                }
-                    
+                
                 var curr = f.Structures[i];
-                var prev = prevExists ? lastStructureFrame[i] : default;
+                var prev = lastStructureFrame[i];
+                
+                Main.instance.LoggerInstance.Msg(
+                    $"[SER][STRUCT] i={i} | active={curr.active}"
+                );
 
-                bool changed;
+                bool changed =
+                    prev.active != curr.active ||
+                    prev.grounded != curr.grounded ||
+                    PosChanged(prev.position, curr.position) ||
+                    RotChanged(prev.rotation, curr.rotation);
 
-                if (!prevExists)
-                {
-                    changed = true;
-                }
-                else
-                {
-                    changed =
-                        prev.active != curr.active ||
-                        prev.grounded != curr.grounded ||
-                        PosChanged(prev.position, curr.position) ||
-                        RotChanged(prev.rotation, curr.rotation);
-                }
+                if (!changed)
+                    continue;
+                
+                frameBw.Write((byte)ChunkType.StructureState);
+                frameBw.Write(i);
+                WriteStructureChunk(frameBw, curr);
 
-                    
-                if (changed)
-                    WriteStructureChunk(bw, curr);
-
-                if (i < lastStructureFrame.Length)
-                    lastStructureFrame[i] = curr;
+                lastStructureFrame[i] = curr;
+                entryCount++;
             }
                 
             // Players
 
             for (int i = 0; i < playerCount; i++)
             {
-                bool currExists = i < f.Players.Length;
-                bool prevExists = i < lastPlayerFrame.Length;
-
-                if (!currExists)
-                {
-                    bw.Write((byte)0);
-                    bw.Write((byte)ChunkType.PlayerState);
+                if (i >= f.Players.Length || i >= lastPlayerFrame.Length)
                     continue;
-                }
-                    
+                
                 var curr = f.Players[i];
-                var prev = prevExists ? lastPlayerFrame[i] : default;
+                var prev = lastPlayerFrame[i];
 
-                bool changed;
+                bool changed =
+                    PosChanged(prev.VRRigPos, curr.VRRigPos) ||
+                    RotChanged(prev.VRRigRot, curr.VRRigRot) ||
+                    PosChanged(prev.LHandPos, curr.LHandPos) ||
+                    RotChanged(prev.LHandRot, curr.LHandRot) ||
+                    PosChanged(prev.RHandPos, curr.RHandPos) ||
+                    RotChanged(prev.RHandRot, curr.RHandRot) ||
+                    PosChanged(prev.HeadPos, curr.HeadPos) ||
+                    RotChanged(prev.HeadRot, curr.HeadRot) ||
+                    prev.active != curr.active ||
+                    prev.Health != curr.Health ||
+                    prev.currentStack != curr.currentStack;
 
-                if (!prevExists)
-                {
-                    changed = true;
-                }
-                else
-                {
-                    changed =
-                        PosChanged(prev.VRRigPos, curr.VRRigPos) ||
-                        RotChanged(prev.VRRigRot, curr.VRRigRot) ||
-                        PosChanged(prev.LHandPos, curr.LHandPos) ||
-                        RotChanged(prev.LHandRot, curr.LHandRot) ||
-                        PosChanged(prev.RHandPos, curr.RHandPos) ||
-                        RotChanged(prev.RHandRot, curr.RHandRot) ||
-                        PosChanged(prev.HeadPos, curr.HeadPos) ||
-                        RotChanged(prev.HeadRot, curr.HeadRot) ||
-                        prev.active != curr.active ||
-                        prev.Health != curr.Health;
-                }
+                if (!changed)
+                    continue;
 
-                bw.Write((byte)(changed ? 1 : 0));
-                bw.Write((byte)ChunkType.PlayerState);
-                if (changed)
-                    WritePlayerChunk(bw, curr);
-                    
-                if (i < lastPlayerFrame.Length)
-                    lastPlayerFrame[i] = curr;
+                frameBw.Write((byte)ChunkType.PlayerState);
+                frameBw.Write(i);
+                WritePlayerChunk(frameBw, curr);
+
+                lastPlayerFrame[i] = curr;
+                entryCount++;
             }
+
+            bw.Write(entryCount);
+            bw.Write(frameMs.ToArray());
         }
         
         return ms.ToArray();
@@ -387,6 +344,15 @@ public class ReplaySerializer
         using var memStream = new MemoryStream(replayData);
         using var br = new BinaryReader(memStream);
         
+        byte[] magic = br.ReadBytes(4);
+        string magicStr = Encoding.ASCII.GetString(magic);
+
+        if (magicStr != "RPLY")
+        {
+            Main.instance.LoggerInstance.Error($"Invalid replay file (magic={magicStr}");
+            return new ReplayInfo();
+        }
+        
         var replayInfo = new ReplayInfo();
         replayInfo.Header = header;
         replayInfo.Frames = ReadFrames(
@@ -399,12 +365,17 @@ public class ReplaySerializer
         return replayInfo;
     }
 
-    private static Frame[] ReadFrames(BinaryReader br, int frameCount, int structureCount, int playerCount)
+    private static Frame[] ReadFrames(
+        BinaryReader br,
+        int frameCount,
+        int structureCount,
+        int playerCount
+    )
     {
         Frame[] frames = new Frame[frameCount];
 
-        StructureState[] lastStructureStates = new StructureState[structureCount];
-        PlayerState[] lastPlayerStates = new PlayerState[playerCount];
+        StructureState[] lastStructures = new StructureState[structureCount];
+        PlayerState[] lastPlayers = new PlayerState[playerCount];
         
         for (int f = 0; f < frameCount; f++)
         {
@@ -413,52 +384,35 @@ public class ReplaySerializer
             
             frame.Structures = new StructureState[structureCount];
             frame.Players = new PlayerState[playerCount];
+
+            Array.Copy(lastStructures, frame.Structures, structureCount);
+            Array.Copy(lastPlayers, frame.Players, playerCount);
             
-            int structureIndex = 0;
-            int playerIndex = 0;
-            
-            int total = structureCount + playerCount;
-            
-            for (int i = 0; i < total; i++)
+            int entryCount = br.ReadInt32();
+
+            for (int e = 0; e < entryCount; e++)
             {
-                byte changed = br.ReadByte();
                 ChunkType type = (ChunkType)br.ReadByte();
+                int index = br.ReadInt32(); // Index in type's corresponding array
 
                 switch (type)
                 {
                     case ChunkType.StructureState:
                     {
-                        if (changed == 1)
-                        {
-                            var s = ReadStructureChunk(br);
-                            frame.Structures[structureIndex] = s;
-                            lastStructureStates[structureIndex] = s;
-                        }
-                        else
-                        {
-                            frame.Structures[structureIndex] = lastStructureStates[structureIndex];
-                        }
-                        
-                        structureIndex++;
+                        var s = ReadStructureChunk(br);
+                        frame.Structures[index] = s;
+                        lastStructures[index] = s;
                         break;
                     }
 
                     case ChunkType.PlayerState:
                     {
-                        if (changed == 1)
-                        {
-                            var p = ReadPlayerChunk(br);
-                            frame.Players[playerIndex] = p;
-                            lastPlayerStates[playerIndex] = p;
-                        }
-                        else
-                        {
-                            frame.Players[playerIndex] = lastPlayerStates[playerIndex];
-                        }
-
-                        playerIndex++;
+                        var p = ReadPlayerChunk(br);
+                        frame.Players[index] = p;
+                        lastPlayers[index] = p;
                         break;
                     }
+
                     default:
                     {
                         int len = br.ReadInt32();
@@ -574,7 +528,7 @@ public enum StructureField
     grounded
 }
 
-public enum StructureType : byte
+public enum StructureType
 {
     Cube,
     Pillar,
@@ -624,7 +578,7 @@ public struct PlayerInfo
     public bool WasHost;
 }
 
-public enum PlayerField : byte {
+public enum PlayerField {
     VRRigPos,
     VRRigRot,
     
@@ -643,7 +597,7 @@ public enum PlayerField : byte {
     active
 }
 
-public enum StackType : short {
+public enum StackType {
     None,
     Dash,
     Jump,
@@ -660,7 +614,7 @@ public enum StackType : short {
 
 // ------------------------
 
-public enum ChunkType : short
+public enum ChunkType
 {
     PlayerState,
     StructureState

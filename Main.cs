@@ -81,6 +81,7 @@ namespace RumbleAnimator
 
         private static Dictionary<StructureType, Pool<PooledMonoBehaviour>> structurePools;
         private static Dictionary<string, AudioCall> structureSpawnSFX;
+        private static Dictionary<StackType, Stack> replayStacks;
         
         public GameObject replayStructures;
         public GameObject[] PlaybackStructures;
@@ -271,9 +272,18 @@ namespace RumbleAnimator
         {
             structurePools = new();
             structureSpawnSFX = new();
+            replayStacks = new();
 
             var processor = PlayerManager.instance.localPlayer.Controller
                 .GetComponent<PlayerStackProcessor>();
+
+            foreach (var stack in processor.availableStacks)
+            {
+                if (Enum.TryParse<StackType>(stack.cachedName, out var type))
+                {
+                    replayStacks[type] = stack;
+                }
+            }
 
             // Pool Cache (Structures + VFX)
             foreach (var pool in PoolManager.instance.availablePools)
@@ -774,7 +784,7 @@ namespace RumbleAnimator
                     var stack = playbackPlayer.Controller
                         .GetSubsystem<PlayerStackProcessor>()
                         .availableStacks.ToArray()
-                        .FirstOrDefault(s => s.cachedName == key.Key);
+                        .FirstOrDefault(s => s.CachedName == key.Key);
 
                     playbackPlayer.Controller
                         .GetSubsystem<PlayerStackProcessor>()

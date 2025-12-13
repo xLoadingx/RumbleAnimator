@@ -9,4 +9,3 @@ TODO:
 - Fix playback framerate not matching recording framerate
 - Fix legs not being pulled up while in the air
 - Fix client jittering
-- Make file backwards compatible

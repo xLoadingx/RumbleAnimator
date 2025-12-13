@@ -8,6 +8,12 @@
 
     <ItemGroup>
     <Reference Include="..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\**\*.dll" Private="false" />
+    <Reference Include="ModUI">
+      <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\ModUI.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\net6\Newtonsoft.Json.dll</HintPath>
+    </Reference>
 
     <Reference Include="RumbleModdingAPI">
       <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\rumblemoddingapi.dll</HintPath>

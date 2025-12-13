@@ -13,6 +13,7 @@ using Il2CppRUMBLE.Networking.MatchFlow;
 using Il2CppRUMBLE.Players;
 using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppRUMBLE.Pools;
+using Il2CppSystem.IO;
 using MelonLoader;
 using MelonLoader.Utils;
 using RumbleModdingAPI;
@@ -106,6 +107,13 @@ namespace RumbleAnimator
             UI.instance.UI_Initialized += OnUIInitialized;
             Calls.onMatchEnded += () => { if (isRecording) StopRecording(); };
             Calls.onMapInitialized += OnMapInitialized;
+
+            Directory.CreateDirectory(
+                Path.Combine(
+                    MelonEnvironment.UserDataDirectory,
+                    "MatchReplays"
+                )
+            );
         }
 
         public override void OnSceneWasLoaded(int buildIndex, string sceneName)
@@ -223,7 +231,7 @@ namespace RumbleAnimator
                 Frames = Frames.ToArray()
             };
             
-            ReplaySerializer.WriteReplayToFile($"{MelonEnvironment.UserDataDirectory}/MatchReplays/Replay_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}.replay", replayInfo);
+            ReplaySerializer.BuildReplayPackage($"{MelonEnvironment.UserDataDirectory}/MatchReplays/Replay_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}.replay", replayInfo);
         }
 
         public StructureType GetStructureType(Structure s)

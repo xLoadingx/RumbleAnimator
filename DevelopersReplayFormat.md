@@ -1,143 +1,195 @@
-# **RumbleAnimator Replay File Format (External Tools Spec)**
+# RumbleAnimator Replay File Format
 
-This describes the binary layout of `.replay` files generated.  
-It is intended for developers who want to parse replays in external software such as Blender.
+This document describes the structure of `.replay` files produced by RumbleAnimator.
+It is intended for developers and technical users who want to read replay data outside
+the game, such as for external tools or basic analysis.
 
-## **1. Container Format**
+---
 
-Every replay file uses a two-layer structure:
+## File Structure
 
-### **Outer Wrapper (compressed container)**
+A replay file is a ZIP archive containing two entries:
 
-```
-4 bytes: "RGZP"
-int32  originalUncompressedSize
-int32  compressedSize
-bytes  GZIP-compressed replay data
-```
+- `manifest.json`
+- `replay`
 
-Only the inner replay data is documented below.
+## manifest.json
 
-## **2. Inner Replay Format**
+`manifest.json` is a UTF-8 encoded JSON file containing all metadata required to parse
+the binary replay stream.
 
-The inner data always begins with the magic string:
+The manifest JSON contains the following fields:
 
-```
-6 bytes: "REPLAY"
-```
+- `Version` (string)
+- `Scene` (string)
+- `DateUTC` (string)
 
-After that, all content is written with `BinaryWriter` defaults (UTF-8 strings, little-endian numbers).
+- `FrameCount` (int)
+- `StructureCount` (int)
+- `FPS` (int)
 
-## **3. Header Layout**
+- `Players` (array)
+- `Structures` (array)
 
-### **Strings**
+Though the game does not always record exactly at what the stated FPS is.  
+I'd recommend using the `Time` value of each chunk compared to the static FPS number.
 
-```
-string  Version
-string  Scene
-string  DateUTC
+---
 
-```
+### Players
 
-### **Integers**
+`Players` is an array of player definitions.  
+The order of this array defines the player indexing used throughout the replay.
 
-```
-int32 FrameCount
-int32 StructureCount
-int32 FPS
+Each player object contains:
 
-```
+- `ActorId` (byte)
+- `MasterId` (string)
+- `Name` (string)
+- `BattlePoints` (int)
+- `VisualData` (string)
+- `EquippedShiftStones` (array of 2 int16 values)
+- `Measurement.Length` (float)
+- `Measurement.ArmSpan` (float)
+- `WasHost` (bool)
 
-### **Players**
+---
 
-```
-int32 PlayerCount
-PlayerInfo (per Player):
-    byte    ActorId
-    string  MasterId
-    string  Name
-    int32   BattlePoints
-    string  VisualData
-    int16   Shiftstone0
-    int16   Shiftstone1
-    float   BodyLength
-    float   ArmSpan
-    bool    WasHost
+### Structures
 
-```
+`Structures` is an array defining the structures present in the match.  
+The order of this array defines the structure indexing used throughout the replay.
 
-### **Structures**
+Each structure object contains:
 
-```
-int32 StructureCount
-StructureInfo (per structure):
-    byte StructureType
+- `Type` (enum value)
+
+Defined structure types:
+
+- Cube
+- Pillar
+- Wall
+- Disc
+- Ball
+- CagedBall
+- LargeRock
+- SmallRock
+
+---
+
+## replay (binary data)
+
+The `replay` entry contains the binary replay stream, which contains all the actual data of the replay.  
+It is compressed using Brotli and stored in the ZIP without additional ZIP compression.
+
+## Replay Binary Stream
+
+### Magic
+
+The stream begins with:
+
+- 4 bytes ASCII: `RPLY`
+
+All values are written using BinaryWriter defaults:
+- Little-endian numbers
+- UTF-8 strings
+- booleans are 1 byte
+
+## Frames
+
+The replay consists of `FrameCount` frames written sequentially.
+
+
+Each frame is written in the following order:
+
+1. Frame timestamp
+2. Structure state entries
+3. Player state entries
+
+### Timestamp
+
+    float Time
+
+Time is expressed in seconds since the start of the replay.
+
+---
+
+## State Entries
+
+Each structure and each player has exactly one state entry per frame.
+The number and order of entries is fixed for the entire replay.
+
+Every state entry begins with:
+
+    byte ChangedFlag
+    byte ChunkType
+
+- `ChangedFlag = 0` means the previous state is reused
+- `ChangedFlag = 1` means a new state chunk follows
+
+`ChunkType` identifies what type of chunk it is:
     
-StructureType enum:
-		0 = Cube
-		1 = Pillar
-		2 = Wall
-		3 = Disc
-		4 = Ball
-		5 = CagedBall
-		6 = LargeRock (Boulder)
-		7 = SmallRock
-```
+    PlayerState
+    StructureState
 
-## **4. Frames**
+---
 
-There are `FrameCount` frames.  
-Each frame begins with:
+## State Chunks
 
-```
-float Time
-```
+When `ChangedFlag` is 1, the following data is written:
 
-### **4.1 Structure Updates**
+    int32 ChunkLength
+    bytes ChunkData
 
-For each of the `StructureCount` structures:
+`ChunkLength` specifies the exact number of bytes in `ChunkData`.
 
-```
-byte changedFlag   // 1 = values follow, 0 = reuse previous
-if changedFlag == 1:
-    Vector3 position   (12 bytes)
-    Quaternion rot     (16 bytes)
-    bool active
-    bool grounded
-```
+`ChunkData` contains a sequence of tagged fields.
+Each field is encoded as:
 
-Must cache the _last known_ state per structure and reuse it when `changedFlag == 0`.
+    byte FieldId
+    field value
 
-----------
+Fields may appear in any order, but keep the defined fields the same order.  
+Fields for each state are defined below
 
-### **4.2 Player Updates**
+---
 
-For each of the `PlayerCount` players:
+## StructureState Chunks
 
-```
-byte changedFlag   // 1 = values follow, 0 = reuse previous
-if changedFlag == 1:
-    Vector3 VRRigPos
-    Quaternion VRRigRot
-    Vector3 HeadPos
-    Quaternion HeadRot
-    Vector3 LHandPos
-    Quaternion LHandRot
-    Vector3 RHandPos
-    Quaternion RHandRot
-    int16 Health
-    bool active
+Structure state chunks describe the transform and status of a structure.
 
-```
+Defined structure fields:
 
-Must reuse last-frame values if `changedFlag == 0`.
+- position -> Vector3 (3 floats)
+- rotation -> Quaternion (4 floats)
+- active -> bool
+- grounded -> bool
 
-## **5. Notes**
+---
 
--   Inner replay data is written raw, then GZIP-compressed.
-    
--   Quaternions and vectors are stored as raw floats.
-    
--   BinaryWriter/Reader default encodings apply.
+## PlayerState Chunks
 
-> Future versions of RumbleAnimator may append new fields to the header or add new per-frame data. Readers should key off the `Version` string and ignore unknown trailing data.
+Player state chunks describe the pose and gameplay state of a player.
+
+Defined player fields:
+
+- VRRigPos     → Vector3
+- VRRigRot     → Quaternion
+- LHandPos     → Vector3
+- LHandRot     → Quaternion
+- RHandPos     → Vector3
+- RHandRot     → Quaternion
+- HeadPos      → Vector3
+- HeadRot      → Quaternion
+- currentStack → int16
+- Health       → int16
+- active       → bool
+
+---
+
+## State Indexing
+
+- Structure index `i` always refers to `Structures[i]` from the manifest
+- Player index `i` always refers to `Players[i]` from the manifest
+
+If `ChangedFlag` is 0, the state from the previous frame at the same index is reused.

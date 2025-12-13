@@ -1,7 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Text;
+using System.Threading.Tasks;
 using Il2CppRUMBLE.Players.Scaling;
+using Newtonsoft.Json;
 using UnityEngine;
 using BinaryReader = System.IO.BinaryReader;
 using BinaryWriter = System.IO.BinaryWriter;
@@ -179,193 +183,220 @@ public class ReplaySerializer
         return Quaternion.Dot(a, b) < ROT_EPS_DOT;
     }
 
-    public static Byte[] Compress(byte[] data)
+    public static async Task BuildReplayPackage(
+        string outputPath,
+        ReplayInfo replay,
+        Dictionary<string, byte[]> voices = null
+    )
+    {
+        try
+        {
+            byte[] rawReplay = SerializeReplayFile(replay);
+
+            byte[] compressedReplay = await Task.Run(() => Compress(rawReplay));
+
+            string manifestJson = JsonConvert.SerializeObject(
+                replay.Header,
+                Formatting.Indented
+            );
+
+            await using var fs = new FileStream(outputPath, FileMode.Create);
+            using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+
+            var manifestEntry = zip.CreateEntry(
+                "manifest.json",
+                CompressionLevel.Optimal
+            );
+
+            await using (var writer = new StreamWriter(manifestEntry.Open()))
+                await writer.WriteAsync(manifestJson);
+
+            var replayEntry = zip.CreateEntry(
+                "replay",
+                CompressionLevel.NoCompression
+            );
+
+            await using (var stream = replayEntry.Open())
+                await stream.WriteAsync(compressedReplay);
+        }
+        catch (Exception e)
+        {
+            Main.instance.LoggerInstance.Error($"Replay save failed: {e}");
+        }
+    }
+    
+    public static byte[] SerializeReplayFile(ReplayInfo replay)
     {
         using var ms = new MemoryStream();
-        using (var gzip = new GZipStream(ms, CompressionLevel.Optimal))
-            gzip.Write(data, 0, data.Length);
+        using var bw = new BinaryWriter(ms);
+        
+        bw.Write(Encoding.ASCII.GetBytes("RPLY"));
+        
+        StructureState[] lastStructureFrame = null;
+        PlayerState[] lastPlayerFrame = null;
+
+        foreach (var f in Main.Frames)
+        {
+            bw.Write(f.Time);
+
+            int structureCount = replay.Header.StructureCount;
+            int playerCount = replay.Header.Players.Length;
+                
+            lastStructureFrame ??= new StructureState[structureCount];
+            lastPlayerFrame ??= new PlayerState[playerCount];
+
+            // Structures
+                
+            for (int i = 0; i < structureCount; i++)
+            {
+                bool currExists = i < f.Structures.Length;
+                bool prevExists = i < lastStructureFrame.Length;
+
+                if (!currExists)
+                {
+                    bw.Write((byte)0);
+                    bw.Write((byte)ChunkType.StructureState);
+                    continue;
+                }
+                    
+                var curr = f.Structures[i];
+                var prev = prevExists ? lastStructureFrame[i] : default;
+
+                bool changed;
+
+                if (!prevExists)
+                {
+                    changed = true;
+                }
+                else
+                {
+                    changed =
+                        prev.active != curr.active ||
+                        prev.grounded != curr.grounded ||
+                        PosChanged(prev.position, curr.position) ||
+                        RotChanged(prev.rotation, curr.rotation);
+                }
+
+                    
+                if (changed)
+                    WriteStructureChunk(bw, curr);
+
+                if (i < lastStructureFrame.Length)
+                    lastStructureFrame[i] = curr;
+            }
+                
+            // Players
+
+            for (int i = 0; i < playerCount; i++)
+            {
+                bool currExists = i < f.Players.Length;
+                bool prevExists = i < lastPlayerFrame.Length;
+
+                if (!currExists)
+                {
+                    bw.Write((byte)0);
+                    bw.Write((byte)ChunkType.PlayerState);
+                    continue;
+                }
+                    
+                var curr = f.Players[i];
+                var prev = prevExists ? lastPlayerFrame[i] : default;
+
+                bool changed;
+
+                if (!prevExists)
+                {
+                    changed = true;
+                }
+                else
+                {
+                    changed =
+                        PosChanged(prev.VRRigPos, curr.VRRigPos) ||
+                        RotChanged(prev.VRRigRot, curr.VRRigRot) ||
+                        PosChanged(prev.LHandPos, curr.LHandPos) ||
+                        RotChanged(prev.LHandRot, curr.LHandRot) ||
+                        PosChanged(prev.RHandPos, curr.RHandPos) ||
+                        RotChanged(prev.RHandRot, curr.RHandRot) ||
+                        PosChanged(prev.HeadPos, curr.HeadPos) ||
+                        RotChanged(prev.HeadRot, curr.HeadRot) ||
+                        prev.active != curr.active ||
+                        prev.Health != curr.Health;
+                }
+
+                bw.Write((byte)(changed ? 1 : 0));
+                bw.Write((byte)ChunkType.PlayerState);
+                if (changed)
+                    WritePlayerChunk(bw, curr);
+                    
+                if (i < lastPlayerFrame.Length)
+                    lastPlayerFrame[i] = curr;
+            }
+        }
         
         return ms.ToArray();
     }
     
-    public static void WriteReplayToFile(string path, ReplayInfo replay)
+    public static byte[] Compress(byte[] data)
     {
-        MemoryStream rawStream = new MemoryStream();
-        using (BinaryWriter bw = new BinaryWriter(rawStream))
-        {
-            bw.Write("REPLAY".ToCharArray());
-            WriteHeader(bw, replay.Header);
-            
-            StructureState[] lastStructureFrame = null;
-            PlayerState[] lastPlayerFrame = null;
-
-            foreach (var f in Main.Frames)
-            {
-                bw.Write(f.Time);
-
-                int structureCount = replay.Header.StructureCount;
-                int playerCount = replay.Header.Players.Length;
-                
-                lastStructureFrame ??= new StructureState[structureCount];
-                lastPlayerFrame ??= new PlayerState[playerCount];
-
-                // Structures
-                
-                for (int i = 0; i < structureCount; i++)
-                {
-                    bool prevExists = i < lastStructureFrame.Length;
-
-                    var curr = f.Structures[i];
-                    var prev = prevExists ? lastStructureFrame[i] : default;
-
-                    bool changed;
-
-                    if (!prevExists)
-                    {
-                        changed = true;
-                    }
-                    else
-                    {
-                        changed =
-                            prev.active != curr.active ||
-                            prev.grounded != curr.grounded ||
-                            PosChanged(prev.position, curr.position) ||
-                            RotChanged(prev.rotation, curr.rotation);
-                    }
-
-                    bw.Write((byte)(changed ? 1 : 0));
-                    bw.Write((byte)ChunkType.StructureState);
-                    if (changed)
-                        WriteStructureChunk(bw, curr);
-
-                    if (i < lastStructureFrame.Length)
-                        lastStructureFrame[i] = curr;
-                }
-                
-                // Players
-
-                for (int i = 0; i < playerCount; i++)
-                {
-                    bool prevExists = i < lastPlayerFrame.Length;
-
-                    var curr = f.Players[i];
-                    var prev = prevExists ? lastPlayerFrame[i] : default;
-
-                    bool changed;
-
-                    if (!prevExists)
-                    {
-                        changed = true;
-                    }
-                    else
-                    {
-                        changed =
-                            PosChanged(prev.VRRigPos, curr.VRRigPos) ||
-                            RotChanged(prev.VRRigRot, curr.VRRigRot) ||
-                            PosChanged(prev.LHandPos, curr.LHandPos) ||
-                            RotChanged(prev.LHandRot, curr.LHandRot) ||
-                            PosChanged(prev.RHandPos, curr.RHandPos) ||
-                            RotChanged(prev.RHandRot, curr.RHandRot) ||
-                            PosChanged(prev.HeadPos, curr.HeadPos) ||
-                            RotChanged(prev.HeadRot, curr.HeadRot) ||
-                            prev.active != curr.active ||
-                            prev.Health != curr.Health;
-                    }
-
-                    bw.Write((byte)(changed ? 1 : 0));
-                    bw.Write((byte)ChunkType.PlayerState);
-                    if (changed)
-                        WritePlayerChunk(bw, curr);
-                    
-                    if (i < lastPlayerFrame.Length)
-                        lastPlayerFrame[i] = curr;
-                }
-            }
-        }
-
-        byte[] uncompressed = rawStream.ToArray();
-        byte[] compressed = Compress(uncompressed);
-
-        using (FileStream fs = new FileStream(path, FileMode.Create))
-        using (BinaryWriter bw2 = new BinaryWriter(fs))
-        {
-            bw2.Write("RGZP".ToCharArray()); 
-            bw2.Write(uncompressed.Length); 
-            bw2.Write(compressed.Length); 
-            bw2.Write(compressed); 
-        }
+        using var ms = new MemoryStream();
+        using (var brotli = new BrotliStream(ms, CompressionLevel.Optimal))
+            brotli.Write(data, 0, data.Length);
+        return ms.ToArray();
     }
 
-    public static byte[] Decompress(byte[] compressed, int originalSize)
+    public static byte[] Decompress(byte[] compressed)
     {
         using var input = new MemoryStream(compressed);
-        using var gzip = new GZipStream(input, CompressionMode.Decompress);
-        using var output = new MemoryStream(originalSize);
-
-        gzip.CopyTo(output);
+        using var brotli = new BrotliStream(input, CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        brotli.CopyTo(output);
         return output.ToArray();
     }
 
-    public static ReplayInfo DeserializeReplay(byte[] data)
+    public static ReplayInfo LoadReplay(string path)
     {
-        ReplayInfo replay = new ReplayInfo();
-
-        using var ms = new MemoryStream(data);
-        using var br = new BinaryReader(ms);
-
-        string magic = new string(br.ReadChars(6));
-        if (magic != "REPLAY")
-        {
-            Main.instance.LoggerInstance.Error("Invalid replay magic");
-            return replay;
-        }
-
-        replay.Header = ReadHeader(br);
-
-        replay.Frames = ReadFrames(br, replay.Header.FrameCount, replay.Header.StructureCount, replay.Header.Players.Length);
-
-        return replay;
-    }
-
-    private static ReplayHeader ReadHeader(BinaryReader br)
-    {
-        var header = new ReplayHeader
-        {
-            Version = br.ReadString(),
-            Scene = br.ReadString(),
-            DateUTC = br.ReadString(),
-            FrameCount = br.ReadInt32(),
-            StructureCount = br.ReadInt32(),
-            FPS = br.ReadInt32()
-        };
-
-        int playerCount = br.ReadInt32();
-        header.Players = new PlayerInfo[playerCount];
-        for (int i = 0; i < playerCount; i++)
-        {
-            header.Players[i].ActorId = br.ReadByte();
-            header.Players[i].MasterId = br.ReadString();
-            header.Players[i].Name = br.ReadString();
-            header.Players[i].BattlePoints = br.ReadInt32();
-            header.Players[i].VisualData = br.ReadString();
-
-            short s0 = br.ReadInt16();
-            short s1 = br.ReadInt16();
-            header.Players[i].EquippedShiftStones = new[] { s0, s1 };
-
-            float length = br.ReadSingle();
-            float armSpan = br.ReadSingle();
-            header.Players[i].Measurement = new PlayerMeasurement(length, armSpan);
-            
-            header.Players[i].WasHost = br.ReadBoolean();
-        }
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Read);
         
-        int structureCount = br.ReadInt32();
-        header.Structures = new StructureInfo[structureCount];
-        for (int i = 0; i < header.Structures.Length; i++)
-            header.Structures[i].Type = (StructureType)br.ReadByte();
+        var manifestEntry = zip.GetEntry("manifest.json");
+        if (manifestEntry == null)
+        {
+            Main.instance.LoggerInstance.Error("Missing manifest.json");
+            return new ReplayInfo();
+        }
 
-        return header;
+        using var reader = new StreamReader(manifestEntry.Open());
+        string manifestJson = reader.ReadToEnd();
+        
+        var header = JsonConvert.DeserializeObject<ReplayHeader>(manifestJson);
+        
+        var replayEntry = zip.GetEntry("replay");
+        if (replayEntry == null)
+        {
+            Main.instance.LoggerInstance.Error("Missing replay");
+            return new ReplayInfo();
+        }
+
+        using var ms = new MemoryStream();
+        using var stream = replayEntry.Open();
+        stream.CopyTo(ms);
+        byte[] compressedReplay = ms.ToArray();
+        
+        byte[] replayData = Decompress(compressedReplay);
+        
+        using var memStream = new MemoryStream(replayData);
+        using var br = new BinaryReader(memStream);
+        
+        var replayInfo = new ReplayInfo();
+        replayInfo.Header = header;
+        replayInfo.Frames = ReadFrames(
+            br,
+            header.FrameCount,
+            header.StructureCount,
+            header.Players.Length
+        );
+
+        return replayInfo;
     }
 
     private static Frame[] ReadFrames(BinaryReader br, int frameCount, int structureCount, int playerCount)
@@ -500,27 +531,6 @@ public class ReplaySerializer
         }
 
         return s;
-    }
-
-    public static ReplayInfo LoadReplay(string path)
-    {
-        using FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read);
-        using BinaryReader br = new BinaryReader(fs);
-
-        string wrapperMagic = new(br.ReadChars(4));
-        if (wrapperMagic != "RGZP")
-        {
-            Main.instance.LoggerInstance.Error("Invalid replay file (missing RGZP)");
-            return new ReplayInfo();
-        }
-
-        int originalSize = br.ReadInt32();
-        int compressedSize = br.ReadInt32();
-        
-        byte[] compressed = br.ReadBytes(compressedSize);
-        byte[] decompressed = Decompress(compressed, originalSize);
-        
-        return DeserializeReplay(decompressed);
     }
 }
 

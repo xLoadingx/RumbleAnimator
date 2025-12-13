@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -49,6 +50,34 @@ public static class BinaryExtensions
             br.ReadSingle()
         );
     }
+
+    public static void Write<TField>(this BinaryWriter bw, TField field, Vector3 v) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)12);
+        bw.Write(v);
+    }
+    
+    public static void Write<TField>(this BinaryWriter bw, TField field, Quaternion q) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)16);
+        bw.Write(q);
+    }
+    
+    public static void Write<TField>(this BinaryWriter bw, TField field, short v) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)2);
+        bw.Write(v);
+    }
+    
+    public static void Write<TField>(this BinaryWriter bw, TField field, bool v) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)1);
+        bw.Write(v);
+    }
 }
 
 public class ReplaySerializer
@@ -76,19 +105,12 @@ public class ReplaySerializer
     static void WriteStructureChunk(BinaryWriter bw, StructureState s)
     {
         using var ms = new MemoryStream();
-        using var temp = new BinaryWriter(ms);
+        using var w = new BinaryWriter(ms);
         
-        temp.Write((byte)StructureField.position);
-        temp.Write(s.position);
-
-        temp.Write((byte)StructureField.rotation);
-        temp.Write(s.rotation);
-        
-        temp.Write((byte)StructureField.active);
-        temp.Write(s.active);
-        
-        temp.Write((byte)StructureField.grounded);
-        temp.Write(s.grounded);
+        w.Write(StructureField.position, s.position);
+        w.Write(StructureField.rotation, s.rotation);
+        w.Write(StructureField.grounded, s.grounded);
+        w.Write(StructureField.active, s.active);
 
         byte[] chunk = ms.ToArray();
         bw.Write(chunk.Length);
@@ -100,38 +122,17 @@ public class ReplaySerializer
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
 
-        w.Write((byte)PlayerField.VRRigPos);
-        w.Write(p.VRRigPos);
-
-        w.Write((byte)PlayerField.VRRigRot);
-        w.Write(p.VRRigRot);
-
-        w.Write((byte)PlayerField.LHandPos);
-        w.Write(p.LHandPos);
-
-        w.Write((byte)PlayerField.LHandRot);
-        w.Write(p.LHandRot);
-
-        w.Write((byte)PlayerField.RHandPos);
-        w.Write(p.RHandPos);
-
-        w.Write((byte)PlayerField.RHandRot);
-        w.Write(p.RHandRot);
-
-        w.Write((byte)PlayerField.HeadPos);
-        w.Write(p.HeadPos);
-
-        w.Write((byte)PlayerField.HeadRot);
-        w.Write(p.HeadRot);
-
-        w.Write((byte)PlayerField.currentStack);
-        w.Write(p.currentStack);
-
-        w.Write((byte)PlayerField.Health);
-        w.Write(p.Health);
-
-        w.Write((byte)PlayerField.active);
-        w.Write(p.active);
+        w.Write(PlayerField.VRRigPos, p.VRRigPos);
+        w.Write(PlayerField.VRRigRot, p.VRRigRot);
+        w.Write(PlayerField.LHandPos, p.LHandPos);
+        w.Write(PlayerField.LHandRot, p.LHandRot);
+        w.Write(PlayerField.RHandPos, p.RHandPos);
+        w.Write(PlayerField.RHandRot, p.RHandRot);
+        w.Write(PlayerField.HeadPos, p.HeadPos);
+        w.Write(PlayerField.HeadRot, p.HeadRot);
+        w.Write(PlayerField.currentStack, p.currentStack);
+        w.Write(PlayerField.Health, p.Health);
+        w.Write(PlayerField.active, p.active);
 
         var chunk = ms.ToArray();
         bw.Write(chunk.Length);
@@ -148,46 +149,42 @@ public class ReplaySerializer
         return Quaternion.Dot(a, b) < ROT_EPS_DOT;
     }
 
-    public static async Task BuildReplayPackage(
+    public static IEnumerator BuildReplayPackage(
         string outputPath,
         ReplayInfo replay,
         Dictionary<string, byte[]> voices = null
     )
     {
-        try
-        {
-            byte[] rawReplay = await Task.Run(() => SerializeReplayFile(replay));
+        byte[] rawReplay = SerializeReplayFile(replay);
+        yield return null;
 
-            byte[] compressedReplay = await Task.Run(() => Compress(rawReplay));
+        byte[] compressedReplay = Compress(rawReplay);
+        yield return null;
 
-            string manifestJson = JsonConvert.SerializeObject(
-                replay.Header,
-                Formatting.Indented
-            );
+        string manifestJson = JsonConvert.SerializeObject(
+            replay.Header,
+            Formatting.Indented
+        );
+        yield return null;
 
-            await using var fs = new FileStream(outputPath, FileMode.Create);
-            using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+        using var fs = new FileStream(outputPath, FileMode.Create);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
 
-            var manifestEntry = zip.CreateEntry(
-                "manifest.json",
-                CompressionLevel.Optimal
-            );
+        var manifestEntry = zip.CreateEntry(
+            "manifest.json",
+            CompressionLevel.Optimal
+        );
 
-            await using (var writer = new StreamWriter(manifestEntry.Open()))
-                await writer.WriteAsync(manifestJson);
+        using (var writer = new StreamWriter(manifestEntry.Open()))
+            writer.Write(manifestJson);
 
-            var replayEntry = zip.CreateEntry(
-                "replay",
-                CompressionLevel.NoCompression
-            );
+        var replayEntry = zip.CreateEntry(
+            "replay",
+            CompressionLevel.NoCompression
+        );
 
-            await using (var stream = replayEntry.Open())
-                await stream.WriteAsync(compressedReplay);
-        }
-        catch (Exception e)
-        {
-            Main.instance.LoggerInstance.Error($"Replay save failed: {e}");
-        }
+        using (var stream = replayEntry.Open())
+            stream.Write(compressedReplay);
     }
     
     public static byte[] SerializeReplayFile(ReplayInfo replay)
@@ -202,21 +199,18 @@ public class ReplaySerializer
 
         foreach (var f in Main.Frames)
         {
-            bw.Write(f.Time);
-
             using var frameMs = new MemoryStream();
             using var frameBw = new BinaryWriter(frameMs);
+            
+            frameBw.Write(f.Time);
 
+            using var entriesMs = new MemoryStream();
+            using var entriesBw = new BinaryWriter(entriesMs);
+            
             int entryCount = 0;
 
             int structureCount = replay.Header.StructureCount;
             int playerCount = replay.Header.Players.Length;
-            
-            Main.instance.LoggerInstance.Msg(
-                $"[SER] frame start | t={f.Time:F3} | " +
-                $"structs={f.Structures.Length}/{structureCount} | " +
-                $"players={f.Players.Length}/{playerCount}"
-            );
                 
             lastStructureFrame ??= new StructureState[structureCount];
             lastPlayerFrame ??= new PlayerState[playerCount];
@@ -230,10 +224,6 @@ public class ReplaySerializer
                 
                 var curr = f.Structures[i];
                 var prev = lastStructureFrame[i];
-                
-                Main.instance.LoggerInstance.Msg(
-                    $"[SER][STRUCT] i={i} | active={curr.active}"
-                );
 
                 bool changed =
                     prev.active != curr.active ||
@@ -244,9 +234,9 @@ public class ReplaySerializer
                 if (!changed)
                     continue;
                 
-                frameBw.Write((byte)ChunkType.StructureState);
-                frameBw.Write(i);
-                WriteStructureChunk(frameBw, curr);
+                entriesBw.Write((byte)ChunkType.StructureState);
+                entriesBw.Write(i);
+                WriteStructureChunk(entriesBw, curr);
 
                 lastStructureFrame[i] = curr;
                 entryCount++;
@@ -278,16 +268,21 @@ public class ReplaySerializer
                 if (!changed)
                     continue;
 
-                frameBw.Write((byte)ChunkType.PlayerState);
-                frameBw.Write(i);
-                WritePlayerChunk(frameBw, curr);
+                entriesBw.Write((byte)ChunkType.PlayerState);
+                entriesBw.Write(i);
+                WritePlayerChunk(entriesBw, curr);
 
                 lastPlayerFrame[i] = curr;
                 entryCount++;
             }
 
-            bw.Write(entryCount);
-            bw.Write(frameMs.ToArray());
+            frameBw.Write(entryCount);
+            frameBw.Write(entriesMs.ToArray());
+
+            byte[] frameData = frameMs.ToArray();
+
+            bw.Write(frameData.Length);
+            bw.Write(frameData);
         }
         
         return ms.ToArray();
@@ -379,6 +374,10 @@ public class ReplaySerializer
         
         for (int f = 0; f < frameCount; f++)
         {
+            int frameSize = br.ReadInt32();
+            
+            long frameEnd = br.BaseStream.Position + frameSize;
+            
             Frame frame = new Frame();
             frame.Time = br.ReadSingle();
             
@@ -393,7 +392,7 @@ public class ReplaySerializer
             for (int e = 0; e < entryCount; e++)
             {
                 ChunkType type = (ChunkType)br.ReadByte();
-                int index = br.ReadInt32(); // Index in type's corresponding array
+                int index = br.ReadInt32();
 
                 switch (type)
                 {
@@ -421,6 +420,8 @@ public class ReplaySerializer
                     }
                 }
             }
+            
+            br.BaseStream.Position = frameEnd;
 
             frames[f] = frame;
         }
@@ -438,6 +439,9 @@ public class ReplaySerializer
         while (br.BaseStream.Position < end)
         {
             PlayerField id = (PlayerField)br.ReadByte();
+            byte size = br.ReadByte();
+            
+            long fieldEnd = br.BaseStream.Position + size;
 
             switch (id)
             {
@@ -452,10 +456,9 @@ public class ReplaySerializer
                 case PlayerField.currentStack: p.currentStack = br.ReadInt16(); break;
                 case PlayerField.Health: p.Health = br.ReadInt16(); break;
                 case PlayerField.active: p.active = br.ReadBoolean(); break;
-                default:
-                    br.BaseStream.Position = end;
-                    break;
             }
+            
+            br.BaseStream.Position = fieldEnd;
         }
 
         return p;
@@ -471,6 +474,9 @@ public class ReplaySerializer
         while (br.BaseStream.Position < end)
         {
             StructureField id = (StructureField)br.ReadByte();
+            byte size = br.ReadByte();
+            
+            long fieldEnd = br.BaseStream.Position + size;
 
             switch (id)
             {
@@ -478,10 +484,9 @@ public class ReplaySerializer
                 case StructureField.rotation: s.rotation = br.ReadQuaternion(); break;
                 case StructureField.active: s.active = br.ReadBoolean(); break;
                 case StructureField.grounded: s.grounded = br.ReadBoolean(); break;
-                default:
-                    br.BaseStream.Position = end;
-                    break;
             }
+            
+            br.BaseStream.Position = fieldEnd;
         }
 
         return s;

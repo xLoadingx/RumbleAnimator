@@ -81,7 +81,6 @@ namespace RumbleAnimator
 
         private static Dictionary<StructureType, Pool<PooledMonoBehaviour>> structurePools;
         private static Dictionary<string, AudioCall> structureSpawnSFX;
-        private static Dictionary<StackType, Stack> replayStacks;
         
         public GameObject replayStructures;
         public GameObject[] PlaybackStructures;
@@ -232,7 +231,12 @@ namespace RumbleAnimator
                 Frames = Frames.ToArray()
             };
             
-            ReplaySerializer.BuildReplayPackage($"{MelonEnvironment.UserDataDirectory}/MatchReplays/Replay_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}.replay", replayInfo);
+            MelonCoroutines.Start(
+                ReplaySerializer.BuildReplayPackage(
+                    $"{MelonEnvironment.UserDataDirectory}/MatchReplays/Replay_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}.replay", 
+                    replayInfo
+                )
+            );
         }
 
         public StructureType GetStructureType(Structure s)
@@ -272,18 +276,9 @@ namespace RumbleAnimator
         {
             structurePools = new();
             structureSpawnSFX = new();
-            replayStacks = new();
 
             var processor = PlayerManager.instance.localPlayer.Controller
                 .GetComponent<PlayerStackProcessor>();
-
-            foreach (var stack in processor.availableStacks)
-            {
-                if (Enum.TryParse<StackType>(stack.cachedName, out var type))
-                {
-                    replayStacks[type] = stack;
-                }
-            }
 
             // Pool Cache (Structures + VFX)
             foreach (var pool in PoolManager.instance.availablePools)

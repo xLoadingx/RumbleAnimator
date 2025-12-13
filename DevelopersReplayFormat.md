@@ -99,17 +99,23 @@ All values are written using BinaryWriter defaults:
 
 The replay consists of `FrameCount` frames written sequentially.
 
-
 Each frame is written in the following order:
 
-1. Frame timestamp
-2. State Entries
+1. Frame length
+2. Frame timestamp
+3. State entry count
+4. State entries
 
-### Timestamp
+### Frame Layout
 
+    int32 FrameLength
     float Time
+    int32 EntryCount
+    StateEntry[EntryCount]
 
-Time is expressed in seconds since the start of the replay.
+`FrameLength` specifies the number of bytes following it that belong to the frame.
+
+Time is expressed in seconds since the start of the replay
 
 ---
 
@@ -134,7 +140,7 @@ Each state entry begins with:
 
 ## State Chunks
 
-Each state entry is immediately followed by its chunk data:
+Each state entry is followed by its chunk data:
 
     int32 ChunkLength
     bytes ChunkData
@@ -145,9 +151,12 @@ Each state entry is immediately followed by its chunk data:
 Each field is encoded as:
 
     byte FieldId
-    field value
+    byte FieldSize
+    bytes FieldValue[FieldSize]
 
-Fields may appear in any order, but keep the defined field values the same order as described below for each state.
+Fields may appear in any order, but keep the defined field values the same order as described below for each state.  
+Unknown fields must be skipped using `FieldSize`
+
 ---
 
 ## StructureState Chunks
@@ -156,10 +165,10 @@ Structure state chunks describe the transform and status of a structure.
 
 Defined structure fields:
 
-- position -> Vector3 (3 floats)
-- rotation -> Quaternion (4 floats)
-- active -> bool
-- grounded -> bool
+- `position` -> Vector3 (3 floats)
+- `rotation` -> Quaternion (4 floats)
+- `active` -> bool
+- `grounded` -> bool
 
 ---
 
@@ -169,17 +178,17 @@ Player state chunks describe the pose and gameplay state of a player.
 
 Defined player fields:
 
-- VRRigPos -> Vector3
-- VRRigRot -> Quaternion
-- LHandPos -> Vector3
-- LHandRot -> Quaternion
-- RHandPos -> Vector3
-- RHandRot -> Quaternion
-- HeadPos -> Vector3
-- HeadRot -> Quaternion
-- currentStack -> int16
-- Health -> int16
-- active -> bool
+- `VRRigPos` -> Vector3
+- `VRRigRot` -> Quaternion
+- `LHandPos` -> Vector3
+- `LHandRot` -> Quaternion
+- `RHandPos` -> Vector3
+- `RHandRot` -> Quaternion
+- `HeadPos` -> Vector3
+- `HeadRot` -> Quaternion
+- `currentStack` -> int16
+- `Health` -> int16
+- `active` -> bool
 
 ---
 

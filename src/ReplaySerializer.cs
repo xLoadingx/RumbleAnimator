@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
-using System.Threading.Tasks;
 using Il2CppRUMBLE.Players.Scaling;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -197,7 +196,7 @@ public class ReplaySerializer
         StructureState[] lastStructureFrame = null;
         PlayerState[] lastPlayerFrame = null;
 
-        foreach (var f in Main.Frames)
+        foreach (var f in Main.instance.Frames)
         {
             using var frameMs = new MemoryStream();
             using var frameBw = new BinaryWriter(frameMs);

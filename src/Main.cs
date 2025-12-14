@@ -2,7 +2,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using Il2Cpp;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppPhoton.Pun;
 using Il2CppRUMBLE.Audio;
@@ -14,6 +13,8 @@ using Il2CppRUMBLE.Players;
 using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppRUMBLE.Pools;
 using Il2CppSystem.IO;
+using Il2CppSystem.Text;
+using Il2CppSystem.Text.RegularExpressions;
 using MelonLoader;
 using MelonLoader.Utils;
 using RumbleModdingAPI;
@@ -21,7 +22,6 @@ using RumbleModUI;
 using UnityEngine;
 using UnityEngine.InputSystem.XR;
 using PlayerState = RumbleAnimator.PlayerState;
-using Stack = Il2CppRUMBLE.MoveSystem.Stack;
 
 [assembly: MelonInfo(typeof(RumbleAnimator.Main), RumbleAnimator.BuildInfo.Name, RumbleAnimator.BuildInfo.Version, RumbleAnimator.BuildInfo.Author)]
 [assembly: MelonGame("Buckethead Entertainment", "RUMBLE")]
@@ -35,24 +35,9 @@ namespace RumbleAnimator
         public const string Version = "1.0.0";
     }
 
-    public class Main : MelonMod
+    internal static class ReplayCache
     {
-        public string currentScene = "Loader";
-
-        // Recording
-        public bool isRecording = false;
-        
-        public int currentRecordingFrame = 0;
-        
-        public float elapsedRecordingTime = 0f;
-        private float lastRecordedTime = 0f;
-        
-        public List<Structure> Structures = new();
-
-        public List<Player> RecordedPlayers = new();
-        public Dictionary<string, int> MasterIdToIndex = new();
-        
-        public Dictionary<string, StackType> NameToStackType = new (StringComparer.OrdinalIgnoreCase)
+        public static Dictionary<string, StackType> NameToStackType = new (StringComparer.OrdinalIgnoreCase)
         {
             { "RockSlide", StackType.Dash },
             { "Jump", StackType.Jump },
@@ -67,212 +52,10 @@ namespace RumbleAnimator
             { "Explode", StackType.Explode }
         };
         
-        public static List<Frame> Frames = new();
+        public static Dictionary<StructureType, Pool<PooledMonoBehaviour>> structurePools;
+        public static Dictionary<string, AudioCall> structureSpawnSFX;
         
-        // Playback
-        public ReplayInfo currentReplay;
-        
-        public bool isPlaying = false;
-        public bool isPaused = false;
-
-        public float elapsedPlaybackTime = 0f;
-        public int currentPlaybackFrame = 0;
-        public int lastEventFrame = -1;
-
-        private static Dictionary<StructureType, Pool<PooledMonoBehaviour>> structurePools;
-        private static Dictionary<string, AudioCall> structureSpawnSFX;
-        
-        public GameObject replayStructures;
-        public GameObject[] PlaybackStructures;
-        public HashSet<Structure> HiddenStructures = new();
-
-        public GameObject replayPlayers;
-        public Clone[] PlaybackPlayers;
-
-        // Settings
-        
-        private Mod rumbleAnimatorMod = new();
-
-        private ModSetting<bool> AutoRecordMatches = new();
-        private ModSetting<bool> AutoRecordParks = new();
-
-        private ModSetting<int> RecordFPS = new();
-
-        public static Main instance;
-
-        public Main() { instance = this; }
-
-        public override void OnLateInitializeMelon()
-        {
-            UI.instance.UI_Initialized += OnUIInitialized;
-            Calls.onMatchEnded += () => { if (isRecording) StopRecording(); };
-            Calls.onMapInitialized += OnMapInitialized;
-
-            Directory.CreateDirectory(
-                Path.Combine(
-                    MelonEnvironment.UserDataDirectory,
-                    "MatchReplays"
-                )
-            );
-        }
-
-        public override void OnSceneWasLoaded(int buildIndex, string sceneName)
-        {
-            currentScene = sceneName;
-            
-            if (isRecording)
-                StopRecording();
-        }
-
-        public void OnMapInitialized()
-        {
-            if ((currentScene is "Map0" or "Map1" && (bool)AutoRecordMatches.SavedValue && PlayerManager.instance.AllPlayers.Count > 1) || (currentScene == "Park" && (bool)AutoRecordParks.SavedValue))
-                StartRecording();
-
-            if ((structureSpawnSFX == null || structurePools == null) && currentScene != "Loader")
-                BuildCacheTables();
-        }
-
-        public void OnUIInitialized()
-        {
-            rumbleAnimatorMod.ModName = BuildInfo.Name;
-            rumbleAnimatorMod.ModVersion = BuildInfo.Version;
-
-            rumbleAnimatorMod.SetFolder("MatchReplays");
-            RecordFPS = rumbleAnimatorMod.AddToList("Recording FPS", 50, "The FPS that recordings record in.", new Tags());
-            AutoRecordMatches = rumbleAnimatorMod.AddToList("Auto Record Matches", false, 0, "Automatically start recordings in matches", new Tags());
-            
-            rumbleAnimatorMod.GetFromFile();
-            
-            UI.instance.AddMod(rumbleAnimatorMod);
-        }
-
-        public void StartRecording()
-        {
-            Frames.Clear();
-            Structures.Clear();
-            RecordedPlayers.Clear();
-            MasterIdToIndex.Clear();
-
-            foreach (var structure in CombatManager.instance.structures)
-            {
-                if (structure == null ||
-                    !structure.TryGetComponent(out Structure _) ||
-                    structure.name.StartsWith("Static Target") ||
-                    structure.name.StartsWith("Moving Target"))
-                    continue;
-                
-                Structures.Add(structure);
-            }
-
-            foreach (var player in PlayerManager.instance.AllPlayers)
-            {
-                if (player == null)
-                    continue;
-                
-                RecordedPlayers.Add(player);
-            }
-            
-            elapsedRecordingTime = 0f;
-            lastRecordedTime = 0f;
-            currentRecordingFrame = 0;
-
-            isRecording = true;
-        }
-
-        public void StopRecording()
-        {
-            isRecording = false;
-
-            var playerInfo = new List<PlayerInfo>();
-
-            foreach (var player in PlayerManager.instance.AllPlayers)
-            {
-                PlayerInfo info = new PlayerInfo();
-
-                info.ActorId = (byte)player.Data.GeneralData.ActorNo;
-                info.MasterId = player.Data.GeneralData.PlayFabMasterId;
-                info.Name = player.Data.GeneralData.PublicUsername;
-                info.BattlePoints = player.Data.GeneralData.BattlePoints;
-                info.VisualData = player.Data.VisualData.ToPlayfabDataString();
-                info.EquippedShiftStones = player.Data.EquipedShiftStones.ToArray();
-                info.Measurement = player.Data.PlayerMeasurement;
-                
-                info.WasHost = (info.ActorId == PhotonNetwork.MasterClient?.ActorNumber);
-
-                playerInfo.Add(info);
-            }
-            
-            var validStructures = new List<StructureInfo>();
-            
-            foreach (var s in Structures)
-            {
-                if (s == null) continue;
-                
-                validStructures.Add(new StructureInfo
-                {
-                    Type = GetStructureType(s)
-                });
-            }
-            
-            var replayInfo = new ReplayInfo
-            {
-                Header = new ReplaySerializer.ReplayHeader
-                {
-                    Version = BuildInfo.Version,
-                    DateUTC = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
-                    FPS = (int)RecordFPS.SavedValue,
-                    Scene = currentScene,
-                    FrameCount = Frames.Count,
-                    StructureCount = validStructures.Count,
-                    Players = playerInfo.ToArray(),
-                    Structures = validStructures.ToArray()
-                },
-                Frames = Frames.ToArray()
-            };
-            
-            MelonCoroutines.Start(
-                ReplaySerializer.BuildReplayPackage(
-                    $"{MelonEnvironment.UserDataDirectory}/MatchReplays/Replay_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}.replay", 
-                    replayInfo
-                )
-            );
-        }
-
-        public StructureType GetStructureType(Structure s)
-        {
-            if (s == null) return StructureType.Cube;
-            
-            string name = s.resourceName;
-
-            if (name.Contains("RockCube")) return StructureType.Cube;
-            if (name.Contains("Pillar")) return StructureType.Pillar;
-            if (name.Contains("Disc")) return StructureType.Disc;
-            if (name.Contains("Wall")) return StructureType.Wall;
-            if (name == "Ball") return StructureType.Ball;
-            if (name.Contains("LargeRock")) return StructureType.LargeRock;
-            if (name.Contains("SmallRock")) return StructureType.SmallRock;
-            if (name.Contains("BoulderBall")) return StructureType.CagedBall;
-
-            return StructureType.Cube;
-        }
-        
-        int GetStackIndexAtFrame(int[] timestamps, int frame)
-        {
-            int index = -1;
-
-            for (int i = 0; i < timestamps.Length; i++)
-            {
-                if (timestamps[i] <= frame)
-                    index = i;
-                else
-                    break;
-            }
-
-            return index;
-        }
-        
-        void BuildCacheTables()
+        public static void BuildCacheTables()
         {
             structurePools = new();
             structureSpawnSFX = new();
@@ -328,6 +111,288 @@ namespace RumbleAnimator
                 structureSpawnSFX[prefabName] = playMod.AudioCall;
             }
         }
+    }
+    
+    public static class Utilities
+    {
+        private static GameObject customMultiplayerMaps;
+        
+        public static string GetFriendlySceneName(string scene)
+        {
+            return scene switch
+            {
+                "Map0" => "Ring",
+                "Map1" => "Pit",
+                _ => scene
+            };
+        }
+
+        public static string GetActiveCustomMapName()
+        {
+            customMultiplayerMaps ??= GameObject.Find("CustomMultiplayerMaps");
+
+            if (customMultiplayerMaps == null)
+                return null;
+
+            for (int i = 0; i < customMultiplayerMaps.transform.childCount; i++)
+            {
+                var child = customMultiplayerMaps.transform.GetChild(i);
+                if (child.gameObject.activeInHierarchy)
+                    return child.name;
+            }
+
+            return null;
+        }
+
+        public static string CleanName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return "Unknown";
+
+            string s = Regex.Replace(name, "<.*?>", string.Empty);
+
+            var sb = new StringBuilder(s.Length);
+            foreach (var ch in s)
+            {
+                if (!char.IsSurrogate(ch))
+                    sb.Append(ch);
+            }
+
+            s = sb.ToString();
+
+            foreach (var c in Path.GetInvalidPathChars())
+                s = s.Replace(c.ToString(), "");
+
+            s = Regex.Replace(s, @"\s+", " ").Trim();
+
+            return string.IsNullOrEmpty(s) ? "Unknown" : s;
+        }
+
+        public static string GetReplayName(ReplayInfo replayInfo)
+        {
+            string sceneName = GetFriendlySceneName(replayInfo.Header.Scene);
+            string customMapName = GetActiveCustomMapName();
+            
+            var localPlayer = PlayerManager.instance.localPlayer;
+            string localPlayerName = CleanName(localPlayer.Data.GeneralData.PublicUsername);
+            
+            string opponent = replayInfo.Header.Players.FirstOrDefault(p => p.MasterId != localPlayer.Data.GeneralData.PlayFabMasterId).Name;
+            string opponentName = !string.IsNullOrEmpty(opponent)
+                ? CleanName(opponent)
+                : "Unknown";
+
+            string timestamp = replayInfo.Header.DateUTC;
+            
+            string matchFormat = $"{localPlayerName}-vs-{opponentName}_on_{sceneName}_{timestamp}.replay";
+            
+            if (!string.IsNullOrEmpty(customMapName))
+                return $"{localPlayerName}-vs-{opponentName}_on_{customMapName}_{timestamp}.replay";
+
+            return sceneName switch
+            {
+                "Ring" or "Pit" => matchFormat,
+                "Park" => $"Replay_{timestamp}_{sceneName}_{replayInfo.Header.Players.Length}P_{localPlayerName}.replay",
+                _ => $"Replay_{timestamp}_{sceneName}_{localPlayerName}.replay"
+            };
+        }
+    }
+
+    public class Main : MelonMod
+    {
+        public string currentScene = "Loader";
+
+        // Recording
+        public bool isRecording = false;
+        
+        public float elapsedRecordingTime = 0f;
+        private float lastRecordedTime = 0f;
+        
+        public List<Structure> Structures = new();
+
+        public List<Player> RecordedPlayers = new();
+        public Dictionary<string, int> MasterIdToIndex = new();
+        
+        public List<Frame> Frames = new();
+        
+        // Playback
+        public ReplayInfo currentReplay;
+        
+        public bool isPlaying = false;
+        public bool isPaused = false;
+
+        public float elapsedPlaybackTime = 0f;
+        public int currentPlaybackFrame = 0;
+        public int lastEventFrame = -1;
+        
+        public GameObject replayStructures;
+        public GameObject[] PlaybackStructures;
+        public HashSet<Structure> HiddenStructures = new();
+
+        public GameObject replayPlayers;
+        public Clone[] PlaybackPlayers;
+
+        // Settings
+        
+        private Mod rumbleAnimatorMod = new();
+
+        private ModSetting<bool> AutoRecordMatches = new();
+        private ModSetting<bool> AutoRecordParks = new();
+
+        private ModSetting<int> RecordFPS = new();
+
+        public static Main instance;
+
+        public Main() { instance = this; }
+
+        public override void OnLateInitializeMelon()
+        {
+            UI.instance.UI_Initialized += OnUIInitialized;
+            Calls.onMatchEnded += () => { if (isRecording) StopRecording(); };
+            Calls.onMapInitialized += OnMapInitialized;
+
+            Directory.CreateDirectory(
+                Path.Combine(
+                    MelonEnvironment.UserDataDirectory,
+                    "MatchReplays"
+                )
+            );
+        }
+
+        public override void OnSceneWasLoaded(int buildIndex, string sceneName)
+        {
+            currentScene = sceneName;
+            
+            if (isRecording)
+                StopRecording();
+        }
+
+        public void OnMapInitialized()
+        {
+            if ((currentScene is "Map0" or "Map1" && (bool)AutoRecordMatches.SavedValue && PlayerManager.instance.AllPlayers.Count > 1) || (currentScene == "Park" && (bool)AutoRecordParks.SavedValue))
+                StartRecording();
+
+            if ((ReplayCache.structureSpawnSFX == null || ReplayCache.structurePools == null) && currentScene != "Loader")
+                ReplayCache.BuildCacheTables();
+        }
+
+        public void OnUIInitialized()
+        {
+            rumbleAnimatorMod.ModName = BuildInfo.Name;
+            rumbleAnimatorMod.ModVersion = BuildInfo.Version;
+
+            rumbleAnimatorMod.SetFolder("MatchReplays");
+            RecordFPS = rumbleAnimatorMod.AddToList("Recording FPS", 50, "The FPS that recordings record in.", new Tags());
+            AutoRecordMatches = rumbleAnimatorMod.AddToList("Auto Record Matches", false, 0, "Automatically start recordings in matches", new Tags());
+            
+            rumbleAnimatorMod.GetFromFile();
+            
+            UI.instance.AddMod(rumbleAnimatorMod);
+        }
+
+        public void StartRecording()
+        {
+            Frames.Clear();
+            Structures.Clear();
+            RecordedPlayers.Clear();
+            MasterIdToIndex.Clear();
+
+            foreach (var structure in CombatManager.instance.structures)
+            {
+                if (structure == null ||
+                    !structure.TryGetComponent(out Structure _) ||
+                    structure.name.StartsWith("Static Target") ||
+                    structure.name.StartsWith("Moving Target"))
+                    continue;
+                
+                Structures.Add(structure);
+            }
+
+            foreach (var player in PlayerManager.instance.AllPlayers)
+            {
+                if (player == null)
+                    continue;
+                
+                RecordedPlayers.Add(player);
+            }
+            
+            elapsedRecordingTime = 0f;
+            lastRecordedTime = 0f;
+
+            isRecording = true;
+        }
+
+        public void StopRecording()
+        {
+            isRecording = false;
+
+            var playerInfo = new List<PlayerInfo>();
+
+            foreach (var player in PlayerManager.instance.AllPlayers)
+            {
+                PlayerInfo info = new PlayerInfo();
+
+                info.ActorId = (byte)player.Data.GeneralData.ActorNo;
+                info.MasterId = player.Data.GeneralData.PlayFabMasterId;
+                info.Name = player.Data.GeneralData.PublicUsername;
+                info.BattlePoints = player.Data.GeneralData.BattlePoints;
+                info.VisualData = player.Data.VisualData.ToPlayfabDataString();
+                info.EquippedShiftStones = player.Data.EquipedShiftStones.ToArray();
+                info.Measurement = player.Data.PlayerMeasurement;
+                
+                info.WasHost = (info.ActorId == PhotonNetwork.MasterClient?.ActorNumber);
+
+                playerInfo.Add(info);
+            }
+            
+            var validStructures = new List<StructureInfo>();
+            
+            foreach (var s in Structures)
+            {
+                if (s == null) continue;
+
+                var name = s.resourceName;
+                
+                validStructures.Add(new StructureInfo
+                {
+                    Type = 
+                        name switch
+                        {
+                            "RockCube" => StructureType.Cube,
+                            "Pillar" => StructureType.Pillar,
+                            "Disc" => StructureType.Disc,
+                            "Wall" => StructureType.Wall,
+                            "Ball" => StructureType.Ball,
+                            "LargeRock" => StructureType.LargeRock,
+                            "SmallRock" => StructureType.SmallRock,
+                            "BoulderBall" => StructureType.CagedBall,
+                            _ => StructureType.Cube
+                        }
+                });
+            }
+            
+            var replayInfo = new ReplayInfo
+            {
+                Header = new ReplaySerializer.ReplayHeader
+                {
+                    Version = BuildInfo.Version,
+                    DateUTC = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
+                    FPS = (int)RecordFPS.SavedValue,
+                    Scene = currentScene,
+                    FrameCount = Frames.Count,
+                    StructureCount = validStructures.Count,
+                    Players = playerInfo.ToArray(),
+                    Structures = validStructures.ToArray()
+                },
+                Frames = Frames.ToArray()
+            };
+            
+            MelonCoroutines.Start(
+                ReplaySerializer.BuildReplayPackage(
+                    $"{MelonEnvironment.UserDataDirectory}/{Utilities.GetReplayName(replayInfo)}", 
+                    replayInfo
+                )
+            );
+        }
         
         public void LoadReplay(string path)
         {
@@ -358,7 +423,7 @@ namespace RumbleAnimator
             for (int i = 0; i < PlaybackStructures.Length; i++)
             {
                 var type = currentReplay.Header.Structures[i].Type;
-                PlaybackStructures[i] = structurePools.GetValueOrDefault(type).FetchFromPool().gameObject;
+                PlaybackStructures[i] = ReplayCache.structurePools.GetValueOrDefault(type).FetchFromPool().gameObject;
                 
                 Structure structure = PlaybackStructures[i].GetComponent<Structure>();
                 structure.indistructable = true;
@@ -541,7 +606,6 @@ namespace RumbleAnimator
             if (elapsedRecordingTime - lastRecordedTime < (1f / 50f))
                 return;
 
-            currentRecordingFrame++;
             lastRecordedTime = elapsedRecordingTime;
             
             // Structures
@@ -699,7 +763,7 @@ namespace RumbleAnimator
                         
                         pool.FetchFromPool(sb.position + offset, Quaternion.identity);
                     
-                        if (structureSpawnSFX.TryGetValue(playbackStructure.name, out var audioCall))
+                        if (ReplayCache.structureSpawnSFX.TryGetValue(playbackStructure.name, out var audioCall))
                             AudioManager.instance.Play(audioCall, playbackStructure.transform.position);
                     }
                     
@@ -774,7 +838,7 @@ namespace RumbleAnimator
 
                 if (pa.currentStack != (short)StackType.None && pa.currentStack != pb.currentStack)
                 {
-                    var key = NameToStackType.FirstOrDefault(s => s.Value == (StackType)pa.currentStack);
+                    var key = ReplayCache.NameToStackType.FirstOrDefault(s => s.Value == (StackType)pa.currentStack);
 
                     var stack = playbackPlayer.Controller
                         .GetSubsystem<PlayerStackProcessor>()

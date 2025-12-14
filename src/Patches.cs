@@ -69,7 +69,7 @@ public class Patches
     {
         static void Postfix(Stack stack, StackConfiguration overrideConfig, PlayerStackProcessor __instance)
         {
-            if (Main.instance.NameToStackType.TryGetValue(stack.cachedName, out var type))
+            if (ReplayCache.NameToStackType.TryGetValue(stack.cachedName, out var type))
                 activations.Add((__instance.ParentController.assignedPlayer.Data.GeneralData.PlayFabMasterId, (short)type));
         }
     }

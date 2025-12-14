@@ -27,6 +27,18 @@ It is primarily intended for:
 - Keybinds for frame seeking
 - Add in-game menu for frame controls and replay selection
 - Fix playback framerate not matching recording framerate
+- Convert pause into a timescale system (timescale = 0 for pausing)
+- Ensure all VFX repsect replay timescale
+- Allow recording while a replay is playing (recording recordings)
+- Support non-deterministic playback (structures follow live stacks instead of teleporting)
+  
+- Replay table for browsing, selecting, and entering replays
+
+### Recording
+- Auto-record toggle for matches (matchmaker)
+- Auto-record toggle for parks (park board)
+- Custom hand gesture to start/stop recording
+- Add SFX for recording, playback, controls, and UI interactions
 
 ### Visuals
 - Add VFX to structures (hold, flick, explode, etc.)

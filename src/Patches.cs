@@ -1,10 +1,8 @@
 using System.Collections.Generic;
-using System.Linq;
 using HarmonyLib;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Players;
-using Il2CppRUMBLE.Pools;
 using UnityEngine;
 
 namespace RumbleAnimator;

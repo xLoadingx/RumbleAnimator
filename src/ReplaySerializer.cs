@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -7,10 +6,12 @@ using System.Text;
 using Il2CppRUMBLE.Players.Scaling;
 using Newtonsoft.Json;
 using UnityEngine;
+using System.Threading.Tasks;
 using BinaryReader = System.IO.BinaryReader;
 using BinaryWriter = System.IO.BinaryWriter;
 using CompressionLevel = System.IO.Compression.CompressionLevel;
 using MemoryStream = System.IO.MemoryStream;
+
 
 namespace RumbleAnimator;
 
@@ -89,6 +90,8 @@ public class ReplaySerializer
     [Serializable]
     public class ReplayHeader
     {
+        public string Title;
+        public string CustomMap;
         public string Version;
         public string Scene;
         public string DateUTC;
@@ -110,6 +113,8 @@ public class ReplaySerializer
         w.Write(StructureField.rotation, s.rotation);
         w.Write(StructureField.grounded, s.grounded);
         w.Write(StructureField.active, s.active);
+        w.Write(StructureField.isFlicked, s.isFlicked);
+        w.Write(StructureField.isHeld, s.isHeld);
 
         byte[] chunk = ms.ToArray();
         bw.Write(chunk.Length);
@@ -148,42 +153,48 @@ public class ReplaySerializer
         return Quaternion.Dot(a, b) < ROT_EPS_DOT;
     }
 
-    public static IEnumerator BuildReplayPackage(
+    public static void BuildReplayPackage(
         string outputPath,
         ReplayInfo replay,
-        Dictionary<string, byte[]> voices = null
+        Dictionary<string, byte[]> voices = null,
+        Action done = null
     )
     {
         byte[] rawReplay = SerializeReplayFile(replay);
-        yield return null;
-
-        byte[] compressedReplay = Compress(rawReplay);
-        yield return null;
 
         string manifestJson = JsonConvert.SerializeObject(
             replay.Header,
             Formatting.Indented
         );
-        yield return null;
 
-        using var fs = new FileStream(outputPath, FileMode.Create);
-        using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+        Task.Run(() =>
+        {
+            byte[] compressedReplay = Compress(rawReplay);
 
-        var manifestEntry = zip.CreateEntry(
-            "manifest.json",
-            CompressionLevel.Optimal
-        );
+            using (var fs = new FileStream(outputPath, FileMode.Create))
+            {
+                using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
+                {
+                    var manifestEntry = zip.CreateEntry(
+                        "manifest.json",
+                        CompressionLevel.Optimal
+                    );
 
-        using (var writer = new StreamWriter(manifestEntry.Open()))
-            writer.Write(manifestJson);
+                    using (var writer = new StreamWriter(manifestEntry.Open()))
+                        writer.Write(manifestJson);
 
-        var replayEntry = zip.CreateEntry(
-            "replay",
-            CompressionLevel.NoCompression
-        );
+                    var replayEntry = zip.CreateEntry(
+                        "replay",
+                        CompressionLevel.NoCompression
+                    );
 
-        using (var stream = replayEntry.Open())
-            stream.Write(compressedReplay);
+                    using (var stream = replayEntry.Open())
+                        stream.Write(compressedReplay);
+                };
+            };
+
+            done?.Invoke();
+        });
     }
     
     public static byte[] SerializeReplayFile(ReplayInfo replay)
@@ -227,6 +238,8 @@ public class ReplaySerializer
                 bool changed =
                     prev.active != curr.active ||
                     prev.grounded != curr.grounded ||
+                    prev.isFlicked != curr.isFlicked ||
+                    prev.isHeld != curr.isHeld ||
                     PosChanged(prev.position, curr.position) ||
                     RotChanged(prev.rotation, curr.rotation);
 
@@ -302,6 +315,60 @@ public class ReplaySerializer
         using var output = new MemoryStream();
         brotli.CopyTo(output);
         return output.ToArray();
+    }
+
+    public static string BuildTitle(ReplayHeader header)
+    {
+        string scene = Utilities.GetFriendlySceneName(header.Scene);
+        string customMap = header.CustomMap;
+
+        string finalScene = string.IsNullOrEmpty(customMap) ? scene : customMap;
+
+        return header.Players?.Length switch
+        {
+            2 when scene != "Park" => $"{header.Players[0].Name}<#1A0D07> vs {header.Players[1].Name}<#1A0D07> - {finalScene}",
+            > 0 when scene == "Park" => $"{header.Players[0].Name}<#1A0D07> - {scene}\n<scale=85%>{header.Players.Length} player{(header.Players.Length > 1 ? "s" : "")}",
+            1 => $"{header.Players[0]} - {finalScene}",
+            _ => $"{finalScene} - {header.DateUTC}"
+        };
+    }
+
+    public static ReplayHeader GetManifest(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Read);
+        
+        var manifestEntry = zip.GetEntry("manifest.json");
+        if (manifestEntry == null)
+            throw new Exception("Replay does not have valid manifest.json");
+
+        using var stream = manifestEntry.Open();
+        using var reader = new StreamReader(stream);
+
+        string json = reader.ReadToEnd();
+        return JsonConvert.DeserializeObject<ReplayHeader>(json);
+    }
+
+    public static void WriteManifest(string replayPath, ReplayHeader header)
+    {
+        ReplayFiles.suppressWatcher = true;
+        
+        using var fs = new FileStream(replayPath, FileMode.Open, FileAccess.ReadWrite);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Update);
+        
+        var manifestEntry = zip.GetEntry("manifest.json");
+
+        manifestEntry?.Delete();
+
+        var newEntry = zip.CreateEntry("manifest.json", CompressionLevel.Optimal);
+        
+        using var writer = new StreamWriter(newEntry.Open());
+        writer.Write(JsonConvert.SerializeObject(
+            header,
+            Formatting.Indented
+        ));
+        
+        ReplayFiles.suppressWatcher = false;
     }
 
     public static ReplayInfo LoadReplay(string path)
@@ -483,6 +550,8 @@ public class ReplaySerializer
                 case StructureField.rotation: s.rotation = br.ReadQuaternion(); break;
                 case StructureField.active: s.active = br.ReadBoolean(); break;
                 case StructureField.grounded: s.grounded = br.ReadBoolean(); break;
+                case StructureField.isFlicked: s.isFlicked = br.ReadBoolean(); break;
+                case StructureField.isHeld: s.isHeld = br.ReadBoolean(); break;
             }
             
             br.BaseStream.Position = fieldEnd;
@@ -516,6 +585,8 @@ public struct StructureState
     public Quaternion rotation;
     public bool active;
     public bool grounded;
+    public bool isHeld;
+    public bool isFlicked;
 }
 
 [Serializable]
@@ -529,7 +600,9 @@ public enum StructureField
     position,
     rotation,
     active,
-    grounded
+    grounded,
+    isHeld,
+    isFlicked
 }
 
 public enum StructureType

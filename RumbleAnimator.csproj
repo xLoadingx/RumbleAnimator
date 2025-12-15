@@ -24,6 +24,14 @@
       <PackageReference Include="LavaGang.MelonLoader" Version="0.7.1" />
       <PackageReference Include="NAudio" Version="2.2.1" />
     </ItemGroup>
+  
+    <ItemGroup>
+      <None Remove="src\replaytable" />
+    </ItemGroup>
+  
+    <ItemGroup>
+      <EmbeddedResource Include="src\replaytable" />
+    </ItemGroup>
 
     <Target Name="PostBuild" AfterTargets="PostBuildEvent">
       <Exec Command="xcopy /Y /R &quot;$(TargetPath)&quot; &quot;E:\SteamLibrary\steamapps\common\RUMBLE\Mods\&quot;&#xA;" />

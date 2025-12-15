@@ -7,6 +7,8 @@ using Il2CppRUMBLE.Players.Scaling;
 using Newtonsoft.Json;
 using UnityEngine;
 using System.Threading.Tasks;
+using Utilities = RumbleAnimator.ReplayGlobals.Utilities;
+using ReplayFiles = RumbleAnimator.ReplayGlobals.ReplayFiles;
 using BinaryReader = System.IO.BinaryReader;
 using BinaryWriter = System.IO.BinaryWriter;
 using CompressionLevel = System.IO.Compression.CompressionLevel;

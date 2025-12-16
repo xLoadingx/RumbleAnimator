@@ -30,7 +30,8 @@
     </ItemGroup>
   
     <ItemGroup>
-      <EmbeddedResource Include="src\replaytable" />
+      <None Remove="src\replayobjects" />
+      <EmbeddedResource Include="src\replayobjects" />
     </ItemGroup>
 
     <Target Name="PostBuild" AfterTargets="PostBuildEvent">

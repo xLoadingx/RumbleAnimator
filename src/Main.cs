@@ -53,6 +53,16 @@ namespace RumbleAnimator
 
         public List<Player> RecordedPlayers = new();
         public Dictionary<string, int> MasterIdToIndex = new();
+        public List<PlayerInfo> PlayerInfos = new();
+
+        public GameObject clapperboardVFX;
+
+        public bool hasPlayed;
+        public float heldTime = 0f;
+        public float soundTimer = 0f;
+        public Transform leftHand;
+        public Transform rightHand;
+        public Transform head;
         
         public List<Frame> Frames = new();
         
@@ -134,8 +144,8 @@ namespace RumbleAnimator
             if ((ReplayCache.SFX == null || ReplayCache.structurePools == null) && currentScene != "Loader")
                 ReplayCache.BuildCacheTables();
 
-            if (replayTable == null)
-                LoadReplayTable();
+            if (replayTable == null && clapperboardVFX == null)
+                LoadReplayObjects();
 
             if (currentScene == "Gym")
             {
@@ -148,7 +158,12 @@ namespace RumbleAnimator
                 replayTable.metadataText.gameObject.SetActive(false);
             }
 
-            replayTable.metadataText.GetComponent<LookAtPlayer>().playerHeadset = PlayerManager.instance.localPlayer.Controller.transform.GetChild(2).GetChild(0).GetChild(0);
+            var vr = PlayerManager.instance.localPlayer.Controller.transform.GetChild(2);
+            replayTable.metadataText.GetComponent<LookAtPlayer>().playerHeadset = vr.GetChild(0).GetChild(0);
+
+            leftHand = vr.GetChild(1);
+            rightHand = vr.GetChild(2);
+            head = vr.GetChild(0).GetChild(0);
         }
 
         public void OnUIInitialized()
@@ -167,14 +182,14 @@ namespace RumbleAnimator
             UI.instance.AddMod(rumbleAnimatorMod);
         }
 
-        public void LoadReplayTable()
+        public void LoadReplayObjects()
         {
             GameObject ReplayTable = new GameObject("Replay Table");
             
             ReplayTable.transform.localPosition = new Vector3(5.9506f, 1.3564f, 4.1906f);
             ReplayTable.transform.localRotation = Quaternion.Euler(270f, 121.5819f, 0f);
 
-            AssetBundle bundle = Calls.LoadAssetBundleFromStream(this, "RumbleAnimator.src.replaytable");
+            AssetBundle bundle = Calls.LoadAssetBundleFromStream(this, "RumbleAnimator.src.replayobjects");
             
             GameObject table = GameObject.Instantiate(bundle.LoadAsset<GameObject>("Table"), ReplayTable.transform);
 
@@ -210,12 +225,9 @@ namespace RumbleAnimator
             Next.transform.localScale = Vector3.one * 1.8f;
             var nextButton = Next.transform.GetChild(0).GetComponent<InteractionButton>();
             nextButton.enabled = true;
+            nextButton.onPressedAudioCall = ReplayCache.SFX["Call_DressingRoom_PartPanelTick_ForwardUnlocked"];
             nextButton.OnPressed.RemoveAllListeners();
-            nextButton.OnPressed.AddListener((UnityAction)(() =>
-            {
-                AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_ForwardUnlocked"], nextButton.transform.localPosition);
-                ReplayFiles.NextReplay();
-            }));
+            nextButton.OnPressed.AddListener((UnityAction)(() => { ReplayFiles.NextReplay(); }));
 
             GameObject Previous = GameObject.Instantiate(Next, ReplayTable.transform);
             
@@ -225,12 +237,9 @@ namespace RumbleAnimator
             Previous.transform.GetChild(0).GetChild(3).localRotation = Quaternion.Euler(90, 180, 0);
             var previousButton = Previous.transform.GetChild(0).GetComponent<InteractionButton>();
             previousButton.enabled = true;
+            previousButton.onPressedAudioCall = ReplayCache.SFX["Call_DressingRoom_PartPanelTick_BackwardUnlocked"];
             previousButton.OnPressed.RemoveAllListeners();
-            previousButton.OnPressed.AddListener((UnityAction)(() =>
-            {
-                AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_BackwardUnlocked"], previousButton.transform.localPosition);
-                ReplayFiles.PreviousReplay();
-            }));
+            previousButton.OnPressed.AddListener((UnityAction)(() => { ReplayFiles.PreviousReplay(); }));
 
             var tableFloat = ReplayTable.AddComponent<TableFloat>();
             tableFloat.speed = (2 * Mathf.PI) / 10;
@@ -256,10 +265,10 @@ namespace RumbleAnimator
 
             metadataText.name = "Metadata Text";
             metadataText.transform.position = new Vector3(5.9575f, 1.8514f, 4.2102f);
-            metadataText.transform.localScale = Vector3.one * 0.1f;
+            metadataText.transform.localScale = Vector3.one * 0.25f;
             
             var textTableFloat = metadataText.AddComponent<TableFloat>();
-            textTableFloat.speed = (2 * Mathf.PI) / 10;
+            textTableFloat.speed = (2.5f * Mathf.PI) / 10;
             textTableFloat.amplitude = 0.01f;
             
             var metadataTMP = metadataText.GetComponent<TextMeshPro>();
@@ -296,24 +305,110 @@ namespace RumbleAnimator
             
             loadReplayButtonComp.OnPressed.AddListener((UnityAction)(() =>
             {
-                Utilities.LoadMap(3, 2.5f);
+                if (ReplayFiles.currentIndex != -1)
+                {
+                    Utilities.LoadMap(3, 2.5f);
+                }
+                else
+                {
+                    AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Failure"], loadReplayButton.transform.position);
+                }
             }));
             
             ReplayFiles.table = replayTable;
             ReplayFiles.HideMetadata();
 
+            clapperboardVFX = GameObject.Instantiate(bundle.LoadAsset<GameObject>("Clapper"));
+            clapperboardVFX.name = "ClapperboardVFX";
+            clapperboardVFX.transform.localScale = Vector3.one * 5f;
+            
+            Material clapperboardMat = new Material(tableMat);
+            clapperboardMat.SetTexture("_Albedo", bundle.LoadAsset<Texture2D>("ClapperTexture"));
+            clapperboardVFX.GetComponent<Renderer>().material = clapperboardMat;
+            clapperboardVFX.transform.GetChild(0).GetComponent<Renderer>().material = clapperboardMat;
+            clapperboardVFX.SetActive(false);
+
             GameObject.DontDestroyOnLoad(ReplayTable);
+            GameObject.DontDestroyOnLoad(clapperboardVFX);
             bundle.Unload(false);
+        }
+
+        public void PlayClapperboardVFX(Vector3 position, Quaternion rotation)
+        {
+            var clapperboard = GameObject.Instantiate(clapperboardVFX);
+            clapperboard.SetActive(true);
+            clapperboard.transform.localScale = Vector3.zero;
+            clapperboard.transform.position = position;
+            clapperboard.transform.rotation = rotation;
+
+            var vfx = PoolManager.instance.GetPool("RockCamSpawn_VFX").FetchFromPool(position, rotation);
+            vfx.transform.localPosition += new Vector3(0f, 0.1f, 0f);
+            vfx.transform.localScale = Vector3.one * 0.9f;
+
+            AudioManager.instance.Play(!isRecording ? ReplayCache.SFX["Call_RockCam_StartRecording"] : ReplayCache.SFX["Call_RockCam_StopRecording"], position);
+
+            MelonCoroutines.Start(Utilities.LerpValue(
+                () => clapperboard.transform.localScale,
+                v => clapperboard.transform.localScale = v,
+                Vector3.Lerp,
+                Vector3.one * 5f,
+                0.5f,
+                Utilities.EaseInOut,
+                () =>
+                {
+                    MelonCoroutines.Start(Utilities.LerpValue(
+                        () => clapperboard.transform.localScale,
+                        v => clapperboard.transform.localScale = v,
+                        Vector3.Lerp,
+                        Vector3.zero,
+                        0.5f,
+                        Utilities.EaseInOut,
+                        () =>
+                        {
+                            GameObject.Destroy(clapperboard);
+                            AudioManager.instance.Play(ReplayCache.SFX["Call_RockCam_Despawn"], position);
+                        }
+                    ));
+                }
+            ));
+            
+            MelonCoroutines.Start(Utilities.LerpValue(
+                () => clapperboard.transform.localRotation,
+                v => clapperboard.transform.localRotation = v,
+                Quaternion.Slerp,
+                rotation * Quaternion.Euler(0f, 17f, 0f),
+                0.8f,
+                Utilities.EaseInOut
+            ));
+            
+            MelonCoroutines.Start(Utilities.LerpValue(
+                () => clapperboard.transform.GetChild(0).localRotation,
+                v => clapperboard.transform.GetChild(0).localRotation = v,
+                Quaternion.Slerp,
+                Quaternion.Euler(0f, 9.221f, 0f),
+                0.5f,
+                Utilities.EaseInOut,
+                () =>
+                {
+                    MelonCoroutines.Start(Utilities.LerpValue(
+                        () => clapperboard.transform.GetChild(0).localRotation,
+                        v => clapperboard.transform.GetChild(0).localRotation = v,
+                        Quaternion.Slerp,
+                        Quaternion.Euler(0f, 347.9986f, 0f),
+                        0.5f,
+                        Utilities.EaseInOut
+                    ));
+                }
+            ));
         }
 
         public void StartRecording()
         {
-            AudioManager.instance.Play(ReplayCache.SFX["Call_RockCam_StartRecording"], PlayerManager.instance.localPlayer.Controller.GetSubsystem<PlayerVR>().transform.position);
-            
             Frames.Clear();
             Structures.Clear();
             RecordedPlayers.Clear();
             MasterIdToIndex.Clear();
+            PlayerInfos.Clear();
 
             foreach (var structure in CombatManager.instance.structures)
             {
@@ -332,24 +427,7 @@ namespace RumbleAnimator
                     continue;
                 
                 RecordedPlayers.Add(player);
-            }
-            
-            elapsedRecordingTime = 0f;
-            lastRecordedTime = 0f;
-
-            isRecording = true;
-        }
-
-        public void StopRecording()
-        {
-            AudioManager.instance.Play(ReplayCache.SFX["Call_RockCam_StopRecording"], PlayerManager.instance.localPlayer.Controller.GetSubsystem<PlayerVR>().transform.position);
-            
-            isRecording = false;
-
-            var playerInfo = new List<PlayerInfo>();
-
-            foreach (var player in PlayerManager.instance.AllPlayers)
-            {
+                
                 PlayerInfo info = new PlayerInfo();
 
                 info.ActorId = (byte)player.Data.GeneralData.ActorNo;
@@ -362,8 +440,18 @@ namespace RumbleAnimator
                 
                 info.WasHost = (info.ActorId == PhotonNetwork.MasterClient?.ActorNumber);
 
-                playerInfo.Add(info);
+                PlayerInfos.Add(info);
             }
+            
+            elapsedRecordingTime = 0f;
+            lastRecordedTime = 0f;
+
+            isRecording = true;
+        }
+
+        public void StopRecording()
+        {
+            isRecording = false;
             
             var validStructures = new List<StructureInfo>();
             
@@ -391,9 +479,8 @@ namespace RumbleAnimator
                 });
             }
 
-            var players = playerInfo.ToArray();
-            var hostPlayer = players.FirstOrDefault(p => p.WasHost);
-            string hostName = hostPlayer.Name ?? players.FirstOrDefault().Name ?? "Unknown";
+            var hostPlayer = PlayerInfos.FirstOrDefault(p => p.WasHost);
+            string hostName = hostPlayer.Name ?? PlayerInfos.FirstOrDefault().Name ?? "Unknown";
 
             string customMap = Utilities.GetActiveCustomMapName();
             string sceneName = string.IsNullOrWhiteSpace(customMap)
@@ -403,10 +490,10 @@ namespace RumbleAnimator
             string title = currentScene switch
             {
                 "Park" => 
-                    $"{hostName}<#1A0D07> - Park\n" + $"<size=85%>{players.Length} Player{(players.Length != 1 ? "s" : "")}",
+                    $"{hostName}<#1A0D07> - Park\n" + $"<size=85%>{PlayerInfos.Count} Player{(PlayerInfos.Count != 1 ? "s" : "")}",
 
-                _ when players.Length == 2 && currentScene != "Gym" =>
-                    $"{players[0].Name}<#1A0D07> vs {players[1].Name}<#1A0D07> - {sceneName}",
+                _ when PlayerInfos.Count == 2 && currentScene != "Gym" =>
+                    $"{PlayerInfos[0].Name}<#1A0D07> vs {PlayerInfos[1].Name}<#1A0D07> - {sceneName}",
 
                 _ =>
                     $"{hostName}<#1A0D07> - {sceneName}"
@@ -424,7 +511,7 @@ namespace RumbleAnimator
                     CustomMap = customMap,
                     FrameCount = Frames.Count,
                     StructureCount = validStructures.Count,
-                    Players = playerInfo.ToArray(),
+                    Players = PlayerInfos.ToArray(),
                     Structures = validStructures.ToArray()
                 },
                 Frames = Frames.ToArray()
@@ -644,6 +731,48 @@ namespace RumbleAnimator
         {
             HandleRecording();
             HandlePlayback();
+
+            HandleReplayPose();
+        }
+
+        public void HandleReplayPose()
+        {
+            if (currentScene != "Loader")
+            {
+                bool LeftSideways = Mathf.Abs(Vector3.Dot(leftHand.forward, head.forward)) < 0.4f;
+                bool RightSideways = Mathf.Abs(Vector3.Dot(rightHand.forward, head.forward)) < 0.4f;
+                bool opposite = Vector3.Dot(leftHand.forward, rightHand.forward) < -0.7f;
+                bool closeEnough = Vector3.Distance(leftHand.position, rightHand.position) < PlayerManager.instance.localPlayer.Data.PlayerMeasurement.ArmSpan * (0.30f / errorsArmspan);
+                
+                if (LeftSideways && RightSideways && opposite && closeEnough && Calls.ControllerMap.LeftController.GetGrip() > 0.8f && Calls.ControllerMap.RightController.GetGrip() > 0.8f)
+                {
+                    heldTime += Time.deltaTime;
+                    soundTimer += Time.deltaTime;
+
+                    if (soundTimer >= 0.5f && !hasPlayed)
+                    {
+                        soundTimer -= 0.5f;
+                        AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_ForwardUnlocked"], head.position);
+                    }
+                    
+                    if (heldTime >= 2f && !hasPlayed)
+                    {
+                        hasPlayed = true;
+                        PlayClapperboardVFX(head.position + head.forward * 1.2f + new Vector3(0f, -0.1f, 0f), Quaternion.Euler(270f, head.eulerAngles.y + 180f, 0f));
+
+                        if (isRecording)
+                            StopRecording();
+                        else
+                            StartRecording();
+                    }
+                }
+                else
+                {
+                    hasPlayed = false;
+                    heldTime = 0f;
+                    soundTimer = 0f;
+                }
+            }
         }
 
         public void HandleRecording()

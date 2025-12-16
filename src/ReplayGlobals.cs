@@ -164,9 +164,9 @@ public class ReplayGlobals
             SceneManager.instance.LoadSceneAsync(index, false, false, fadeDuration);
         }
 
-        public static float EaseIn(float t)
+        public static float EaseInOut(float t)
         {
-            return t * t;
+            return t < 0.5f ? 2 * t * t : 1 - Pow(-2 * t + 2, 2) / 2;
         }
         
         public static IEnumerator LerpValue<T>(
@@ -175,7 +175,8 @@ public class ReplayGlobals
             Func<T, T, float, T> lerpFunc,
             T targetValue,
             float duration,
-            Func<float, float> easing = null
+            Func<float, float> easing = null,
+            Action done = null
         )
         {
             T startValue = getter();
@@ -184,12 +185,13 @@ public class ReplayGlobals
             while (t < 1f)
             {
                 t += Time.deltaTime / duration;
-                float easedT = easing?.Invoke(Mathf.Clamp01(t)) ?? t;
+                float easedT = easing?.Invoke(Clamp01(t)) ?? t;
                 setter(lerpFunc(startValue, targetValue, easedT));
                 yield return null;
             }
 
             setter(targetValue);
+            done?.Invoke();
         }
     }
 
@@ -200,6 +202,7 @@ public class ReplayGlobals
         public static List<string> replayPaths = new();
         public static int currentIndex = -1;
         public static ReplayTable table;
+        public static bool metadataLerping = false;
         
         public static FileSystemWatcher replayWatcher;
         public static bool reloadQueued;
@@ -271,15 +274,17 @@ public class ReplayGlobals
 
         public static void HideMetadata()
         {
-            if (table.metadataText == null) return;
+            if (table.metadataText == null || metadataLerping) return;
+
+            metadataLerping = true;
             
             MelonCoroutines.Start(Utilities.LerpValue(
                 () => table.desiredMetadataTextHeight,
                 v => table.desiredMetadataTextHeight = v,
-                Mathf.Lerp,
+                Lerp,
                 1.5229f,
                 1f,
-                Utilities.EaseIn
+                Utilities.EaseInOut
             ));
 
             MelonCoroutines.Start(Utilities.LerpValue(
@@ -288,31 +293,68 @@ public class ReplayGlobals
                 Vector3.Lerp,
                 Vector3.zero,
                 1.3f,
-                Utilities.EaseIn
+                Utilities.EaseInOut,
+                () => metadataLerping = false
             ));
         }
 
         public static void ShowMetadata()
         {
-            if (table.metadataText == null) return;
+            if (table.metadataText == null || metadataLerping) return;
+
+            metadataLerping = true;
             
             MelonCoroutines.Start(Utilities.LerpValue(
                 () => table.desiredMetadataTextHeight,
                 v => table.desiredMetadataTextHeight = v,
-                Mathf.Lerp,
-                1.8514f,
+                Lerp,
+                1.9514f,
                 1.3f,
-                Utilities.EaseIn
+                Utilities.EaseInOut
             ));
 
             MelonCoroutines.Start(Utilities.LerpValue(
                 () => table.metadataText.transform.localScale,
                 v => table.metadataText.transform.localScale = v,
                 Vector3.Lerp,
-                Vector3.one * 0.1f,
+                Vector3.one * 0.25f,
                 1.3f,
-                Utilities.EaseIn
+                Utilities.EaseInOut,
+                () => metadataLerping = false
             ));
+        }
+
+        static string BuildPlayerLine(PlayerInfo[] players)
+        {
+            if (players == null || players.Length <= 2)
+                return string.Empty;
+
+            const int maxNames = 3;
+
+            int count = players.Length;
+            int shown = Math.Min(count, maxNames);
+
+            var names = new List<string>(shown);
+            for (int i = 0; i < shown; i++)
+                names.Add($"{players[i].Name}<#FFF>");
+
+            string line = string.Join(", ", names);
+
+            if (count > maxNames)
+                line += $" +{count - maxNames} others";
+
+            return
+                $"{count} players\n" +
+                $"{line}\n";
+        }
+
+        public static TimeSpan GetDuration(ReplaySerializer.ReplayHeader header)
+        {
+            if (header.FPS <= 0)
+                return TimeSpan.Zero;
+
+            double seconds = (double)header.FrameCount / header.FPS;
+            return TimeSpan.FromSeconds(seconds);
         }
         
         public static void SelectReplay(int index)
@@ -341,7 +383,17 @@ public class ReplayGlobals
                         ? Path.GetFileNameWithoutExtension(currentReplayPath)
                         : header.Title;
 
-                    table.metadataText.text = header.DateUTC;
+                    var duration = GetDuration(header);
+                    table.metadataText.text = 
+                        $"{header.Title}\n" +
+                        $"{header.DateUTC}\n" +
+                        $"Version {header.Version}\n\n" +
+                        $"{(string.IsNullOrEmpty(header.CustomMap) ? Utilities.GetFriendlySceneName(header.Scene) : header.CustomMap)}\n\n" +
+                        $"{BuildPlayerLine(header.Players)}\n" +
+                        $"FPS: {header.FPS}\n" +
+                        $"Frames: {header.FrameCount}\n" +
+                        $"Duration: {duration.Minutes}:{duration.Seconds:D2}\n\n" +
+                        $"{header.Structures.Length} structure{(header.Structures.Length > 1 ? "s" : "")}";
                     ShowMetadata();
                 }
                 catch

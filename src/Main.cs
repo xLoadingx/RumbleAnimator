@@ -19,6 +19,7 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.InputSystem.XR;
 using UnityEngine.VFX;
+using static UnityEngine.Mathf;
 using InteractionButton = Il2CppRUMBLE.Interactions.InteractionBase.InteractionButton;
 using Main = RumbleAnimator.Main;
 using PlayerState = RumbleAnimator.PlayerState;
@@ -26,6 +27,7 @@ using Stack = Il2CppRUMBLE.MoveSystem.Stack;
 using Utilities = RumbleAnimator.ReplayGlobals.Utilities;
 using ReplayFiles = RumbleAnimator.ReplayGlobals.ReplayFiles;
 using ReplayCache = RumbleAnimator.ReplayGlobals.ReplayCache;
+using ReplayVoices = RumbleAnimator.ReplayGlobals.ReplayVoices;
 
 [assembly: MelonInfo(typeof(Main), RumbleAnimator.BuildInfo.Name, RumbleAnimator.BuildInfo.Version, RumbleAnimator.BuildInfo.Author)]
 [assembly: MelonGame("Buckethead Entertainment", "RUMBLE")]
@@ -158,6 +160,8 @@ namespace RumbleAnimator
                 replayTable.metadataText.gameObject.SetActive(false);
             }
 
+            ReplayVoices.Hook();
+
             var vr = PlayerManager.instance.localPlayer.Controller.transform.GetChild(2);
             replayTable.metadataText.GetComponent<LookAtPlayer>().playerHeadset = vr.GetChild(0).GetChild(0);
 
@@ -242,7 +246,7 @@ namespace RumbleAnimator
             previousButton.OnPressed.AddListener((UnityAction)(() => { ReplayFiles.PreviousReplay(); }));
 
             var tableFloat = ReplayTable.AddComponent<TableFloat>();
-            tableFloat.speed = (2 * Mathf.PI) / 10;
+            tableFloat.speed = (2 * PI) / 10;
             tableFloat.amplitude = 0.01f;
 
             var replayNameText = Calls.Create.NewText("No Replay Selected", 5f, new Color(0.102f, 0.051f, 0.0275f), Vector3.zero, Quaternion.identity);
@@ -268,7 +272,7 @@ namespace RumbleAnimator
             metadataText.transform.localScale = Vector3.one * 0.25f;
             
             var textTableFloat = metadataText.AddComponent<TableFloat>();
-            textTableFloat.speed = (2.5f * Mathf.PI) / 10;
+            textTableFloat.speed = (2.5f * PI) / 10;
             textTableFloat.amplitude = 0.01f;
             
             var metadataTMP = metadataText.GetComponent<TextMeshPro>();
@@ -307,7 +311,21 @@ namespace RumbleAnimator
             {
                 if (ReplayFiles.currentIndex != -1)
                 {
-                    Utilities.LoadMap(3, 2.5f);
+                    if (ReplayFiles.currentHeader.Scene is "Map0" or "Map1")
+                    {
+                        ReplayFiles.HideMetadata();
+                        MelonCoroutines.Start(Utilities.LoadMap(ReplayFiles.currentHeader.Scene == "Map0" ? 3 : 4, 2.5f, () =>
+                        {
+                            LoadReplay(ReplayFiles.currentReplayPath);
+                            ReplayFiles.ShowMetadata();
+                            isPlaying = true;
+                        }));
+                    }
+                    else if (ReplayFiles.currentHeader.Scene != "Park")
+                    {
+                        LoadReplay(ReplayFiles.currentReplayPath);
+                        isPlaying = true;
+                    }
                 }
                 else
                 {
@@ -380,7 +398,7 @@ namespace RumbleAnimator
                 0.8f,
                 Utilities.EaseInOut
             ));
-            
+
             MelonCoroutines.Start(Utilities.LerpValue(
                 () => clapperboard.transform.GetChild(0).localRotation,
                 v => clapperboard.transform.GetChild(0).localRotation = v,
@@ -490,13 +508,13 @@ namespace RumbleAnimator
             string title = currentScene switch
             {
                 "Park" => 
-                    $"{hostName}<#1A0D07> - Park\n" + $"<size=85%>{PlayerInfos.Count} Player{(PlayerInfos.Count != 1 ? "s" : "")}",
+                    $"{hostName}<#FFF> - Park\n" + $"<size=85%>{PlayerInfos.Count} Player{(PlayerInfos.Count != 1 ? "s" : "")}",
 
                 _ when PlayerInfos.Count == 2 && currentScene != "Gym" =>
-                    $"{PlayerInfos[0].Name}<#1A0D07> vs {PlayerInfos[1].Name}<#1A0D07> - {sceneName}",
+                    $"{PlayerInfos[0].Name}<#FFF> vs {PlayerInfos[1].Name}<#FFF> - {sceneName}",
 
                 _ =>
-                    $"{hostName}<#1A0D07> - {sceneName}"
+                    $"{hostName}<#FFF> - {sceneName}"
             };
             
             var replayInfo = new ReplayInfo
@@ -737,10 +755,10 @@ namespace RumbleAnimator
 
         public void HandleReplayPose()
         {
-            if (currentScene != "Loader")
+            if (currentScene != "Loader" && leftHand != null && rightHand != null && head != null)
             {
-                bool LeftSideways = Mathf.Abs(Vector3.Dot(leftHand.forward, head.forward)) < 0.4f;
-                bool RightSideways = Mathf.Abs(Vector3.Dot(rightHand.forward, head.forward)) < 0.4f;
+                bool LeftSideways = Abs(Vector3.Dot(leftHand.forward, head.forward)) < 0.4f;
+                bool RightSideways = Abs(Vector3.Dot(rightHand.forward, head.forward)) < 0.4f;
                 bool opposite = Vector3.Dot(leftHand.forward, rightHand.forward) < -0.7f;
                 bool closeEnough = Vector3.Distance(leftHand.position, rightHand.position) < PlayerManager.instance.localPlayer.Data.PlayerMeasurement.ArmSpan * (0.30f / errorsArmspan);
                 
@@ -928,13 +946,21 @@ namespace RumbleAnimator
             
             elapsedPlaybackTime += Time.deltaTime * playbackSpeed;
 
-            float timePerFrame = 1f / currentReplay.Header.FPS;
-            
-            while (elapsedPlaybackTime >= timePerFrame)
+            while (currentPlaybackFrame < currentReplay.Frames.Length - 2 &&
+                   currentReplay.Frames[currentPlaybackFrame + 1].Time <= elapsedPlaybackTime)
             {
-                elapsedPlaybackTime -= timePerFrame;
                 currentPlaybackFrame++;
             }
+            
+            Frame a = currentReplay.Frames[currentPlaybackFrame];
+            Frame b = currentReplay.Frames[currentPlaybackFrame + 1];
+
+            float span = b.Time - a.Time;
+            float t = span > 0f
+                ? (elapsedPlaybackTime - a.Time) / span
+                : 1f;
+            
+            ApplyInterpolatedFrame(currentPlaybackFrame, Clamp01(t));
 
             foreach (var vfx in visualEffects)
             {
@@ -944,10 +970,6 @@ namespace RumbleAnimator
                 if (ve != null)
                     ve.playRate = playbackSpeed;
             }
-
-            float t = elapsedPlaybackTime / timePerFrame;
-
-            ApplyInterpolatedFrame(currentPlaybackFrame, t);
         }
 
         bool TryFire(ReplayEvent evt, int frame)
@@ -976,13 +998,23 @@ namespace RumbleAnimator
                 var sb = b.Structures[i];
                 var poolManager = PoolManager.instance;
 
-                bool justSpawned = false;
+                var vfxSize = playbackStructure.name switch
+                {
+                    "Disc" or "Ball" => 1f,
+                    "RockCube" => 1.5f,
+                    "Wall" or "Pillar" => 2.5f,
+                    
+                    "LargeRock" => 3f,
+
+                    _ => 1f
+                };
                 
-                if (!playbackStructure.GetComponent<Rigidbody>().isKinematic)
-                    playbackStructure.GetComponent<Rigidbody>().isKinematic = true;
+                var rb = playbackStructure.GetComponent<Rigidbody>();
+                if (!rb.isKinematic)
+                    rb.isKinematic = true;
                 
                 if (playbackStructure.GetComponentInChildren<MeshRenderer>().material.GetFloat("_shake") == 1)
-                    playbackStructure.GetComponentInChildren<MeshRenderer>().material.SetFloat("_shake", 1f);
+                    playbackStructure.GetComponentInChildren<MeshRenderer>().material.SetFloat("_shake", 0f);
                 
                 // Event checks
                 
@@ -1007,8 +1039,6 @@ namespace RumbleAnimator
                 // Structure Spawned
                 if (!sa.active && sb.active && TryFire(ReplayEvent.StructureSpawn, currentPlaybackFrame))
                 {
-                    justSpawned = true;
-                    
                     var pool = poolManager.GetPool("DustSpawn_VFX");
 
                     var offset = playbackStructure.name is "Ball" or "Disc" ? Vector3.zero : new Vector3(0, 0.5f, 0);
@@ -1030,7 +1060,7 @@ namespace RumbleAnimator
                         AudioManager.instance.Play(audioCall, playbackStructure.transform.position);
 
                     foreach (var visualEffect in playbackStructure.GetComponentsInChildren<PooledVisualEffect>())
-                        visualEffect.ReturnToPool();
+                        GameObject.Destroy(visualEffect.gameObject);
                 }
                 
                 // Grounded
@@ -1057,12 +1087,11 @@ namespace RumbleAnimator
                 if (!sa.isHeld && sb.isHeld && TryFire(ReplayEvent.HoldStart, currentPlaybackFrame))
                 {
                     var pool = poolManager.GetPool("Hold_VFX");
-                    var effect = pool.FetchFromPool(sb.position, sb.rotation);
-
-                    effect.transform.SetParent(playbackStructure.transform);
+                    var effect = GameObject.Instantiate(pool.poolItem.gameObject, playbackStructure.transform);
+                    
                     effect.transform.localPosition = Vector3.zero;
                     effect.transform.localRotation = Quaternion.identity;
-                    effect.transform.localScale = Vector3.one;
+                    effect.transform.localScale = Vector3.one * vfxSize;
                     visualEffects.Add(effect.GetComponent<PooledVisualEffect>());
 
                     AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Hold"], sb.position);
@@ -1072,12 +1101,11 @@ namespace RumbleAnimator
                 if (!sa.isFlicked && sb.isFlicked && TryFire(ReplayEvent.FlickStart, currentPlaybackFrame))
                 {
                     var pool = poolManager.GetPool("Flick_VFX");
-                    var effect = pool.FetchFromPool(sb.position, sb.rotation);
+                    var effect = GameObject.Instantiate(pool.poolItem.gameObject, playbackStructure.transform);
 
-                    effect.transform.SetParent(playbackStructure.transform);
                     effect.transform.localPosition = Vector3.zero;
                     effect.transform.localRotation = Quaternion.identity;
-                    effect.transform.localScale = Vector3.one;
+                    effect.transform.localScale = Vector3.one * vfxSize;
 
                     visualEffects.Add(effect.GetComponent<PooledVisualEffect>());
                     
@@ -1100,7 +1128,7 @@ namespace RumbleAnimator
 
                     foreach (var vfx in toRemove)
                     {
-                        vfx.ReturnToPool();
+                        GameObject.Destroy(vfx);
                         visualEffects.Remove(vfx);
                     }
                 }
@@ -1121,7 +1149,7 @@ namespace RumbleAnimator
 
                     foreach (var vfx in toRemove)
                     {
-                        vfx.ReturnToPool();
+                        GameObject.Destroy(vfx);
                         visualEffects.Remove(vfx);
                     }
                 }
@@ -1141,10 +1169,7 @@ namespace RumbleAnimator
                 Vector3 pos = Vector3.Lerp(sa.position, sb.position, t);
                 Quaternion rot = Quaternion.Slerp(sa.rotation, sb.rotation, t);
 
-                if (!justSpawned)
-                    playbackStructure.transform.SetPositionAndRotation(pos, rot);
-                else
-                    playbackStructure.transform.SetPositionAndRotation(sb.position, sb.rotation);
+                playbackStructure.transform.SetPositionAndRotation(pos, rot);
             }
 
             for (int i = 0; i < PlaybackPlayers.Length; i++)
@@ -1167,13 +1192,13 @@ namespace RumbleAnimator
                     if (pb.Health < pa.Health && pb.Health != 0 && TryFire(ReplayEvent.PlayerHit, currentPlaybackFrame))
                     {
                         var hitmarker = PoolManager.instance.GetPool("PlayerHitmarker")
-                            .FetchFromPool(playbackPlayer.VRRig.transform.position + new Vector3(0, 0.5f, 0), Quaternion.identity)
+                            .FetchFromPool(playbackPlayer.Head.transform.position - new Vector3(0, 0.5f, 0), Quaternion.identity)
                             .Cast<PlayerHitmarker>();
 
                         hitmarker.SetDamage(pa.Health - pb.Health);
                         hitmarker.gameObject.SetActive(true);
                         hitmarker.Play();
-                        hitmarker.GetComponent<PooledVisualEffect>().visualEffect.playRate = playbackSpeed;
+                        hitmarker.GetComponent<VisualEffect>().playRate = playbackSpeed;
                         
                         visualEffects.Add(hitmarker.GetComponent<PooledVisualEffect>());
                     }
@@ -1249,9 +1274,9 @@ public class TableFloat : MonoBehaviour
 
     void Update()
     {
-        startPos.y = Mathf.Lerp(startPos.y, targetY + (float)Main.instance.tableOffset.SavedValue, Time.deltaTime * 4f);
+        startPos.y = Lerp(startPos.y, targetY + (float)Main.instance.tableOffset.SavedValue, Time.deltaTime * 4f);
         
-        float y = Mathf.Sin(Time.time * speed) * amplitude;
+        float y = Sin(Time.time * speed) * amplitude;
         transform.localPosition = startPos + Vector3.up * y;
     }
 }
@@ -1302,6 +1327,9 @@ public class LookAtPlayer : MonoBehaviour
 
     public void Update()
     {
+        if (playerHeadset == null)
+            return;
+        
         var rotation = Quaternion.LookRotation(transform.position - playerHeadset.position);
 
         transform.localRotation = new Quaternion(transform.localRotation.x, rotation.y, transform.localRotation.z, transform.localRotation.w);

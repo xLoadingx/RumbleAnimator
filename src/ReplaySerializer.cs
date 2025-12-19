@@ -155,7 +155,7 @@ public class ReplaySerializer
         return Quaternion.Dot(a, b) < ROT_EPS_DOT;
     }
 
-    public static void BuildReplayPackage(
+    public static async Task BuildReplayPackage(
         string outputPath,
         ReplayInfo replay,
         Dictionary<string, byte[]> voices = null,
@@ -169,7 +169,7 @@ public class ReplaySerializer
             Formatting.Indented
         );
 
-        Task.Run(() =>
+        await Task.Run(() =>
         {
             byte[] compressedReplay = Compress(rawReplay);
 
@@ -194,9 +194,9 @@ public class ReplaySerializer
                         stream.Write(compressedReplay);
                 };
             };
-
-            done?.Invoke();
         });
+        
+        done?.Invoke();
     }
     
     public static byte[] SerializeReplayFile(ReplayInfo replay)
@@ -328,8 +328,8 @@ public class ReplaySerializer
 
         return header.Players?.Length switch
         {
-            2 when scene != "Park" => $"{header.Players[0].Name}<#1A0D07> vs {header.Players[1].Name}<#1A0D07> - {finalScene}",
-            > 0 when scene == "Park" => $"{header.Players[0].Name}<#1A0D07> - {scene}\n<scale=85%>{header.Players.Length} player{(header.Players.Length > 1 ? "s" : "")}",
+            2 when scene != "Park" => $"{header.Players[0].Name}<#FFF> vs {header.Players[1].Name}<#FFF> - {finalScene}",
+            > 0 when scene == "Park" => $"{header.Players[0].Name}<#FFF> - {scene}\n<scale=85%>{header.Players.Length} player{(header.Players.Length > 1 ? "s" : "")}",
             1 => $"{header.Players[0]} - {finalScene}",
             _ => $"{finalScene} - {header.DateUTC}"
         };

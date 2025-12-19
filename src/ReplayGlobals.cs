@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Il2CppPhoton.Voice;
 using Il2CppRUMBLE.Audio;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
@@ -13,6 +14,9 @@ using Il2CppSystem.Text.RegularExpressions;
 using Il2CppTMPro;
 using MelonLoader;
 using MelonLoader.Utils;
+using Il2CppPhoton.Voice.PUN;
+using Il2CppPhoton.Voice.Unity;
+using NAudio.Wave;
 using UnityEngine;
 using static UnityEngine.Mathf;
 
@@ -156,12 +160,19 @@ public class ReplayGlobals
             };
         }
 
-        public static void LoadMap(int index, float fadeDuration = 2f)
+        public static IEnumerator LoadMap(int index, float fadeDuration = 2f, Action onLoaded = null)
         {
             foreach (var structure in CombatManager.instance.structures.ToArray())
                 structure.Kill(Vector3.zero, false, false);
             
             SceneManager.instance.LoadSceneAsync(index, false, false, fadeDuration);
+
+            while (SceneManager.instance.IsLoadingScene)
+                yield return null;
+
+            yield return new WaitForSeconds(0.1f);
+            MelonLogger.Msg("Loaded");
+            onLoaded?.Invoke();
         }
 
         public static float EaseInOut(float t)
@@ -209,6 +220,7 @@ public class ReplayGlobals
         public static bool suppressWatcher;
 
         public static string currentReplayPath = null;
+        public static ReplaySerializer.ReplayHeader currentHeader = null;
 
         private static Dictionary<string, ReplaySerializer.ReplayHeader> manifestCache = new();
 
@@ -379,6 +391,7 @@ public class ReplayGlobals
                 try
                 {
                     var header = GetCachedManifest(currentReplayPath);
+                    currentHeader = header;
                     table.replayNameText.text = string.IsNullOrWhiteSpace(header.Title)
                         ? Path.GetFileNameWithoutExtension(currentReplayPath)
                         : header.Title;
@@ -388,7 +401,7 @@ public class ReplayGlobals
                         $"{header.Title}\n" +
                         $"{header.DateUTC}\n" +
                         $"Version {header.Version}\n\n" +
-                        $"{(string.IsNullOrEmpty(header.CustomMap) ? Utilities.GetFriendlySceneName(header.Scene) : header.CustomMap)}\n\n" +
+                        $"{(string.IsNullOrEmpty(header.CustomMap) ? Utilities.GetFriendlySceneName(header.Scene) : header.CustomMap)}\n" +
                         $"{BuildPlayerLine(header.Players)}\n" +
                         $"FPS: {header.FPS}\n" +
                         $"Frames: {header.FrameCount}\n" +
@@ -477,6 +490,138 @@ public class ReplayGlobals
             text.fontSizeMax = 10f;
             text.enableWordWrapping = true;
             text.overflowMode = TextOverflowModes.Overflow;
+        }
+    }
+
+    internal static class ReplayVoices
+    {
+        private static readonly Dictionary<int, VoiceRecorder> active = new();
+        public static bool hooked = false;
+        
+        private static void Log(string msg)
+        {
+            Main.instance.LoggerInstance.Msg($"[ReplayVoices] {msg}");
+        }
+
+        public static void Hook()
+        {
+            if (hooked)
+                return;
+
+            hooked = true;
+            Log("Hooked into PunVoiceClient.RemoteVoiceAdded");
+
+            PunVoiceClient.instance.RemoteVoiceAdded += (Il2CppSystem.Action<RemoteVoiceLink>)((RemoteVoiceLink link) =>
+            {
+                Log($"RemoteVoiceAdded | PlayerId={link.PlayerId} VoiceId={link.VoiceId}");
+                
+                if (Main.instance.isRecording)
+                    StartRecording(link, PlayerManager.instance.AllPlayers.ToArray().FirstOrDefault(p => p.Data.GeneralData.ActorNo == link.PlayerId)?.Data.GeneralData.PublicUsername);
+
+                link.RemoteVoiceRemoved += (Il2CppSystem.Action)(() =>
+                {
+                    Log($"RemoteVoiceRemoved | PlayerId={link.PlayerId}");
+                    StopRecording(link);
+                });
+            });
+        }
+
+        public static void StartRecording(RemoteVoiceLink link, string playerName)
+        {
+            if (active.ContainsKey(link.PlayerId))
+            {
+                Log($"Already recording PlayerId={link.PlayerId}");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(playerName))
+                playerName = "Unknown";
+            
+            Log($"StartRecording | PlayerId={link.PlayerId} Name={playerName}");
+
+            var recorder = new VoiceRecorder(link, playerName);
+            active.Add(link.PlayerId, recorder);
+            recorder.Start();
+        }
+        
+        public static void StopRecording(RemoteVoiceLink link)
+        {
+            if (!active.TryGetValue(link.PlayerId, out var recorder))
+            {
+                Log($"StopRecording called but no active recorder | PlayerId={link.PlayerId}");
+                return;
+            }
+            
+            Log($"StopRecording | PlayerId={link.PlayerId}");
+
+            recorder.Stop();
+            active.Remove(link.PlayerId);
+        }
+
+        internal class VoiceRecorder
+        {
+            private readonly RemoteVoiceLink link;
+            private readonly string playerName;
+
+            private int frameCount;
+
+            private readonly int sampleRate;
+            private readonly int channels;
+            
+            private WaveFileWriter writer;
+            private bool initialized;
+
+            public VoiceRecorder(RemoteVoiceLink link, string playerName)
+            {
+                this.link = link;
+                this.playerName = Utilities.CleanName(playerName);
+                sampleRate = link.VoiceInfo.SamplingRate;
+                channels = link.VoiceInfo.Channels;
+            }
+
+            public void Start()
+            {
+                Log($"Recorder start | {playerName} SR={sampleRate} C={channels}");
+                link.FloatFrameDecoded += (Il2CppSystem.Action<FrameOut<float>>)OnFrameDecoded;
+            }
+
+            public void Stop()
+            {
+                Log($"Recorder stop | {playerName} Frames={frameCount}");
+                link.FloatFrameDecoded -= (Il2CppSystem.Action<FrameOut<float>>)OnFrameDecoded;
+                writer?.Dispose();
+                writer = null;
+            }
+
+            private void OnFrameDecoded(FrameOut<float> frame)
+            {
+                if (!initialized)
+                    InitWriter(frame);
+
+                frameCount++;
+
+                if (frameCount == 1)
+                    Log($"First frame | {playerName} Samples={frame.Buf.Length}");
+
+                writer.WriteSamples(frame.Buf.ToArray(), 0, frame.Buf.Length);
+            }
+
+            private void InitWriter(FrameOut<float> frame)
+            {
+                Directory.CreateDirectory(ReplayFiles.currentReplayPath);
+
+                var path = Path.Combine(ReplayFiles.currentReplayPath, $"{playerName}.wav");
+
+                Log($"Creating WAV | {path}");
+                
+                var format = WaveFormat.CreateIeeeFloatWaveFormat(
+                    sampleRate,
+                    channels
+                );
+
+                writer = new WaveFileWriter(path, format);
+                initialized = true;
+            }
         }
     }
 }

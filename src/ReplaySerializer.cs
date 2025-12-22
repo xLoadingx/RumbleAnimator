@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
@@ -13,7 +12,7 @@ using BinaryReader = System.IO.BinaryReader;
 using BinaryWriter = System.IO.BinaryWriter;
 using CompressionLevel = System.IO.Compression.CompressionLevel;
 using MemoryStream = System.IO.MemoryStream;
-
+using ReplayVoices = RumbleAnimator.ReplayGlobals.ReplayVoices;
 
 namespace RumbleAnimator;
 
@@ -99,50 +98,70 @@ public class ReplaySerializer
         public string DateUTC;
 
         public int FrameCount;
-        public int StructureCount;
         public int FPS;
+
+        public int PedestalCount;
 
         public PlayerInfo[] Players;
         public StructureInfo[] Structures;
+
+        public VoiceTrackInfo[] Voices;
     }
-    
-    static void WriteStructureChunk(BinaryWriter bw, StructureState s)
+
+    static void WriteChunk(
+        BinaryWriter bw,
+        Action<BinaryWriter> writeFields
+    )
     {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
-        
-        w.Write(StructureField.position, s.position);
-        w.Write(StructureField.rotation, s.rotation);
-        w.Write(StructureField.grounded, s.grounded);
-        w.Write(StructureField.active, s.active);
-        w.Write(StructureField.isFlicked, s.isFlicked);
-        w.Write(StructureField.isHeld, s.isHeld);
+
+        writeFields(w);
 
         byte[] chunk = ms.ToArray();
         bw.Write(chunk.Length);
         bw.Write(chunk);
     }
     
+    static void WriteStructureChunk(BinaryWriter bw, StructureState s)
+    {
+        WriteChunk(bw, w =>
+        {
+            w.Write(StructureField.position, s.position);
+            w.Write(StructureField.rotation, s.rotation);
+            w.Write(StructureField.grounded, s.grounded);
+            w.Write(StructureField.active, s.active);
+            w.Write(StructureField.isFlicked, s.isFlicked);
+            w.Write(StructureField.isHeld, s.isHeld);
+            w.Write(StructureField.isShaking, s.isShaking);
+        });
+    }
+    
     static void WritePlayerChunk(BinaryWriter bw, PlayerState p)
     {
-        using var ms = new MemoryStream();
-        using var w = new BinaryWriter(ms);
+        WriteChunk(bw, w =>
+        {
+            w.Write(PlayerField.VRRigPos, p.VRRigPos);
+            w.Write(PlayerField.VRRigRot, p.VRRigRot);
+            w.Write(PlayerField.LHandPos, p.LHandPos);
+            w.Write(PlayerField.LHandRot, p.LHandRot);
+            w.Write(PlayerField.RHandPos, p.RHandPos);
+            w.Write(PlayerField.RHandRot, p.RHandRot);
+            w.Write(PlayerField.HeadPos, p.HeadPos);
+            w.Write(PlayerField.HeadRot, p.HeadRot);
+            w.Write(PlayerField.currentStack, p.currentStack);
+            w.Write(PlayerField.Health, p.Health);
+            w.Write(PlayerField.active, p.active);
+        });
+    }
 
-        w.Write(PlayerField.VRRigPos, p.VRRigPos);
-        w.Write(PlayerField.VRRigRot, p.VRRigRot);
-        w.Write(PlayerField.LHandPos, p.LHandPos);
-        w.Write(PlayerField.LHandRot, p.LHandRot);
-        w.Write(PlayerField.RHandPos, p.RHandPos);
-        w.Write(PlayerField.RHandRot, p.RHandRot);
-        w.Write(PlayerField.HeadPos, p.HeadPos);
-        w.Write(PlayerField.HeadRot, p.HeadRot);
-        w.Write(PlayerField.currentStack, p.currentStack);
-        w.Write(PlayerField.Health, p.Health);
-        w.Write(PlayerField.active, p.active);
-
-        var chunk = ms.ToArray();
-        bw.Write(chunk.Length);
-        bw.Write(chunk);
+    static void WritePedestalChunk(BinaryWriter bw, PedestalState p)
+    {
+        WriteChunk(bw, w =>
+        {
+            w.Write(PedestalField.position, p.position);
+            w.Write(PedestalField.active, p.active);
+        });
     }
 
     static bool PosChanged(Vector3 a, Vector3 b)
@@ -158,7 +177,6 @@ public class ReplaySerializer
     public static async Task BuildReplayPackage(
         string outputPath,
         ReplayInfo replay,
-        Dictionary<string, byte[]> voices = null,
         Action done = null
     )
     {
@@ -208,6 +226,7 @@ public class ReplaySerializer
         
         StructureState[] lastStructureFrame = null;
         PlayerState[] lastPlayerFrame = null;
+        PedestalState[] lastPedestalFrame = null;
 
         foreach (var f in Main.instance.Frames)
         {
@@ -221,11 +240,13 @@ public class ReplaySerializer
             
             int entryCount = 0;
 
-            int structureCount = replay.Header.StructureCount;
+            int structureCount = replay.Header.Structures.Length;
             int playerCount = replay.Header.Players.Length;
+            int pedestalCount = replay.Header.PedestalCount;
                 
             lastStructureFrame ??= new StructureState[structureCount];
             lastPlayerFrame ??= new PlayerState[playerCount];
+            lastPedestalFrame ??= new PedestalState[2];
 
             // Structures
                 
@@ -242,6 +263,7 @@ public class ReplaySerializer
                     prev.grounded != curr.grounded ||
                     prev.isFlicked != curr.isFlicked ||
                     prev.isHeld != curr.isHeld ||
+                    prev.isShaking != curr.isShaking ||
                     PosChanged(prev.position, curr.position) ||
                     RotChanged(prev.rotation, curr.rotation);
 
@@ -287,6 +309,29 @@ public class ReplaySerializer
                 WritePlayerChunk(entriesBw, curr);
 
                 lastPlayerFrame[i] = curr;
+                entryCount++;
+            }
+
+            for (int i = 0; i < pedestalCount; i++)
+            {
+                if (i >= f.Pedestals.Length || i >= lastPedestalFrame.Length)
+                    continue;
+
+                var curr = f.Pedestals[i];
+                var prev = lastPedestalFrame[i];
+
+                bool changed =
+                    PosChanged(prev.position, curr.position) ||
+                    prev.active != curr.active;
+
+                if (!changed)
+                    continue;
+                
+                entriesBw.Write((byte)ChunkType.PedestalState);
+                entriesBw.Write(i);
+                WritePedestalChunk(entriesBw, curr);
+                
+                lastPedestalFrame[i] = curr;
                 entryCount++;
             }
 
@@ -421,8 +466,9 @@ public class ReplaySerializer
         replayInfo.Frames = ReadFrames(
             br,
             header.FrameCount,
-            header.StructureCount,
-            header.Players.Length
+            header.Structures.Length,
+            header.Players.Length,
+            header.PedestalCount
         );
 
         return replayInfo;
@@ -432,13 +478,15 @@ public class ReplaySerializer
         BinaryReader br,
         int frameCount,
         int structureCount,
-        int playerCount
+        int playerCount,
+        int pedestalCount
     )
     {
         Frame[] frames = new Frame[frameCount];
 
-        StructureState[] lastStructures = new StructureState[structureCount];
-        PlayerState[] lastPlayers = new PlayerState[playerCount];
+        StructureState[] lastStructures = Utilities.NewArray<StructureState>(structureCount);
+        PlayerState[] lastPlayers = Utilities.NewArray<PlayerState>(playerCount);
+        PedestalState[] lastPedestals = Utilities.NewArray<PedestalState>(pedestalCount);
         
         for (int f = 0; f < frameCount; f++)
         {
@@ -449,11 +497,9 @@ public class ReplaySerializer
             Frame frame = new Frame();
             frame.Time = br.ReadSingle();
             
-            frame.Structures = new StructureState[structureCount];
-            frame.Players = new PlayerState[playerCount];
-
-            Array.Copy(lastStructures, frame.Structures, structureCount);
-            Array.Copy(lastPlayers, frame.Players, playerCount);
+            frame.Structures = Utilities.NewArray(structureCount, lastStructures);
+            frame.Players = Utilities.NewArray(playerCount, lastPlayers);
+            frame.Pedestals = Utilities.NewArray(pedestalCount, lastPedestals);
             
             int entryCount = br.ReadInt32();
 
@@ -480,6 +526,14 @@ public class ReplaySerializer
                         break;
                     }
 
+                    case ChunkType.PedestalState:
+                    {
+                        var p = ReadPedestalChunk(br);
+                        frame.Pedestals[index] = p;
+                        lastPedestals[index] = p;
+                        break;
+                    }
+
                     default:
                     {
                         int len = br.ReadInt32();
@@ -497,91 +551,123 @@ public class ReplaySerializer
         return frames;
     }
 
-    static PlayerState ReadPlayerChunk(BinaryReader br)
+    static T ReadChunk<T, TField>(
+        BinaryReader br,
+        Func<T> ctor,
+        Action<T, TField, BinaryReader> readField
+    )
+        where TField : Enum
     {
         int len = br.ReadInt32();
         long end = br.BaseStream.Position + len;
 
-        PlayerState p = new();
+        T state = ctor();
 
         while (br.BaseStream.Position < end)
         {
-            PlayerField id = (PlayerField)br.ReadByte();
-            byte size = br.ReadByte();
+            byte raw = br.ReadByte();
+            TField id = (TField)Enum.ToObject(typeof(TField), raw);
             
+            byte size = br.ReadByte();
             long fieldEnd = br.BaseStream.Position + size;
 
-            switch (id)
+            if (!Enum.IsDefined(typeof(TField), id))
             {
-                case PlayerField.VRRigPos: p.VRRigPos = br.ReadVector3(); break;
-                case PlayerField.VRRigRot: p.VRRigRot = br.ReadQuaternion(); break;
-                case PlayerField.LHandPos: p.LHandPos = br.ReadVector3(); break;
-                case PlayerField.LHandRot: p.LHandRot = br.ReadQuaternion(); break;
-                case PlayerField.RHandPos: p.RHandPos = br.ReadVector3(); break;
-                case PlayerField.RHandRot: p.RHandRot = br.ReadQuaternion(); break;
-                case PlayerField.HeadPos: p.HeadPos = br.ReadVector3(); break;
-                case PlayerField.HeadRot: p.HeadRot = br.ReadQuaternion(); break;
-                case PlayerField.currentStack: p.currentStack = br.ReadInt16(); break;
-                case PlayerField.Health: p.Health = br.ReadInt16(); break;
-                case PlayerField.active: p.active = br.ReadBoolean(); break;
+                br.BaseStream.Position = fieldEnd;
+                continue;
             }
+
+            readField(state, id, br);
             
             br.BaseStream.Position = fieldEnd;
         }
 
-        return p;
+        return state;
+    }
+
+    static PlayerState ReadPlayerChunk(BinaryReader br)
+    {
+        return ReadChunk<PlayerState, PlayerField>(
+            br,
+            () => new PlayerState(),
+            (p, id, r) =>
+            {
+                switch (id)
+                {
+                    case PlayerField.VRRigPos: p.VRRigPos = r.ReadVector3(); break;
+                    case PlayerField.VRRigRot: p.VRRigRot = r.ReadQuaternion(); break;
+                    case PlayerField.LHandPos: p.LHandPos = r.ReadVector3(); break;
+                    case PlayerField.LHandRot: p.LHandRot = r.ReadQuaternion(); break;
+                    case PlayerField.RHandPos: p.RHandPos = r.ReadVector3(); break;
+                    case PlayerField.RHandRot: p.RHandRot = r.ReadQuaternion(); break;
+                    case PlayerField.HeadPos: p.HeadPos = r.ReadVector3(); break;
+                    case PlayerField.HeadRot: p.HeadRot = r.ReadQuaternion(); break;
+                    case PlayerField.currentStack: p.currentStack = r.ReadInt16(); break;
+                    case PlayerField.Health: p.Health = r.ReadInt16(); break;
+                    case PlayerField.active: p.active = r.ReadBoolean(); break;
+                }
+            }
+        );
     }
 
     static StructureState ReadStructureChunk(BinaryReader br)
     {
-        int len = br.ReadInt32();
-        long end = br.BaseStream.Position + len;
-
-        StructureState s = new();
-
-        while (br.BaseStream.Position < end)
-        {
-            StructureField id = (StructureField)br.ReadByte();
-            byte size = br.ReadByte();
-            
-            long fieldEnd = br.BaseStream.Position + size;
-
-            switch (id)
+        return ReadChunk<StructureState, StructureField>(
+            br,
+            () => new StructureState(),
+            (s, id, r) =>
             {
-                case StructureField.position: s.position = br.ReadVector3(); break;
-                case StructureField.rotation: s.rotation = br.ReadQuaternion(); break;
-                case StructureField.active: s.active = br.ReadBoolean(); break;
-                case StructureField.grounded: s.grounded = br.ReadBoolean(); break;
-                case StructureField.isFlicked: s.isFlicked = br.ReadBoolean(); break;
-                case StructureField.isHeld: s.isHeld = br.ReadBoolean(); break;
+                switch (id)
+                {
+                    case StructureField.position: s.position = r.ReadVector3(); break;
+                    case StructureField.rotation: s.rotation = r.ReadQuaternion(); break;
+                    case StructureField.active: s.active = r.ReadBoolean(); break;
+                    case StructureField.grounded: s.grounded = r.ReadBoolean(); break;
+                    case StructureField.isFlicked: s.isFlicked = r.ReadBoolean(); break;
+                    case StructureField.isHeld: s.isHeld = r.ReadBoolean(); break;
+                    case StructureField.isShaking: s.isShaking = r.ReadBoolean(); break;
+                }
             }
-            
-            br.BaseStream.Position = fieldEnd;
-        }
+        );
+    }
 
-        return s;
+    static PedestalState ReadPedestalChunk(BinaryReader br)
+    {
+        return ReadChunk<PedestalState, PedestalField>(
+            br,
+            () => new PedestalState(),
+            (p, id, r) =>
+            {
+                switch (id)
+                {
+                    case PedestalField.position: p.position = r.ReadVector3(); break;
+                    case PedestalField.active: p.active = r.ReadBoolean(); break;
+                }
+            }
+        );
     }
 }
 
 [Serializable]
-public struct ReplayInfo
+public class ReplayInfo
 {
     public ReplaySerializer.ReplayHeader Header;
     public Frame[] Frames;
 }
 
 [Serializable]
-public struct Frame
+public class Frame
 {
     public float Time;
     public StructureState[] Structures;
     public PlayerState[] Players;
+    public PedestalState[] Pedestals;
 }
 
 // ------- Structure State -------
 
 [Serializable]
-public struct StructureState
+public class StructureState
 {
     public Vector3 position;
     public Quaternion rotation;
@@ -589,10 +675,11 @@ public struct StructureState
     public bool grounded;
     public bool isHeld;
     public bool isFlicked;
+    public bool isShaking;
 }
 
 [Serializable]
-public struct StructureInfo
+public class StructureInfo
 {
     public StructureType Type;
 }
@@ -604,7 +691,8 @@ public enum StructureField
     active,
     grounded,
     isHeld,
-    isFlicked
+    isFlicked,
+    isShaking
 }
 
 public enum StructureType
@@ -622,7 +710,7 @@ public enum StructureType
 // ------- Player State -------
 
 [Serializable]
-public struct PlayerState
+public class PlayerState
 {
     public Vector3 VRRigPos;
     public Quaternion VRRigRot;
@@ -643,7 +731,7 @@ public struct PlayerState
 }
 
 [Serializable]
-public struct PlayerInfo
+public class PlayerInfo
 {
     public byte ActorId;
     public string MasterId;
@@ -676,6 +764,14 @@ public enum PlayerField {
     active
 }
 
+[Serializable]
+public class VoiceTrackInfo
+{
+    public int ActorId;
+    public string FileName;
+    public float StartTime;
+}
+
 public enum StackType {
     None,
     Dash,
@@ -691,11 +787,28 @@ public enum StackType {
     Explode
 }
 
+// ------- Pedestal State -------
+
+[Serializable]
+public class PedestalState
+{
+    public Vector3 position;
+    
+    public bool active;
+}
+
+public enum PedestalField
+{
+    position,
+    active
+}
+
 // ------------------------
 
 public enum ChunkType
 {
     PlayerState,
-    StructureState
+    StructureState,
+    PedestalState
 }
 

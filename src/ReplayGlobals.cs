@@ -4,7 +4,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+// using Concentus;
+// using Concentus.Enums;
+// using Concentus.Oggfile;
+// using Concentus.Structs;
 using Il2CppPhoton.Voice;
+using Il2CppPhoton.Voice.PUN;
+using Il2CppPhoton.Voice.Unity;
 using Il2CppRUMBLE.Audio;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
@@ -14,11 +20,11 @@ using Il2CppSystem.Text.RegularExpressions;
 using Il2CppTMPro;
 using MelonLoader;
 using MelonLoader.Utils;
-using Il2CppPhoton.Voice.PUN;
-using Il2CppPhoton.Voice.Unity;
-using NAudio.Wave;
+using Newtonsoft.Json;
+using RumbleModdingAPI;
 using UnityEngine;
 using static UnityEngine.Mathf;
+using Random = UnityEngine.Random;
 
 namespace RumbleAnimator;
 
@@ -160,6 +166,33 @@ public class ReplayGlobals
             };
         }
 
+        public static T[] NewArray<T>(int count, T[] copyFrom = null) where T : new()
+        {
+            var arr = new T[count];
+            for (int i = 0; i < count; i++)
+                arr[i] = copyFrom != null && i < copyFrom.Length
+                    ? copyFrom[i]
+                    : new T();
+            return arr;
+        }
+
+        public static IEnumerable<GameObject> EnumerateMatchPedestals()
+        {
+            if (Main.instance.currentScene == "Map0")
+            {
+                yield return Calls.GameObjects.Map0.Logic.Pedestals.MatchpedestalP1.GetGameObject();
+                yield return Calls.GameObjects.Map0.Logic.Pedestals.MatchpedestalP2.GetGameObject();
+                yield break;
+            }
+
+            if (Main.instance.currentScene == "Map1")
+            {
+                yield return Calls.GameObjects.Map1.Logic.Pedestals.MatchpedestalP1.GetGameObject();
+                yield return Calls.GameObjects.Map1.Logic.Pedestals.MatchpedestalP2.GetGameObject();
+                yield break;
+            }
+        }
+
         public static IEnumerator LoadMap(int index, float fadeDuration = 2f, Action onLoaded = null)
         {
             foreach (var structure in CombatManager.instance.structures.ToArray())
@@ -175,6 +208,16 @@ public class ReplayGlobals
             onLoaded?.Invoke();
         }
 
+        public static Color32 RandomColor()
+        {
+            float h = Random.value;
+            float s = Random.Range(0.6f, 0.9f);
+            float v = Random.Range(0.7f, 1.0f);
+            
+            Color c = Color.HSVToRGB(h, s, v);
+            return c;
+        }
+
         public static float EaseInOut(float t)
         {
             return t < 0.5f ? 2 * t * t : 1 - Pow(-2 * t + 2, 2) / 2;
@@ -187,9 +230,12 @@ public class ReplayGlobals
             T targetValue,
             float duration,
             Func<float, float> easing = null,
-            Action done = null
+            Action done = null,
+            float delay = 0f
         )
         {
+            yield return new WaitForSeconds(delay);
+            
             T startValue = getter();
             float t = 0f;
 
@@ -214,6 +260,7 @@ public class ReplayGlobals
         public static int currentIndex = -1;
         public static ReplayTable table;
         public static bool metadataLerping = false;
+        public static bool metadataHidden = false;
         
         public static FileSystemWatcher replayWatcher;
         public static bool reloadQueued;
@@ -289,6 +336,7 @@ public class ReplayGlobals
             if (table.metadataText == null || metadataLerping) return;
 
             metadataLerping = true;
+            metadataHidden = true;
             
             MelonCoroutines.Start(Utilities.LerpValue(
                 () => table.desiredMetadataTextHeight,
@@ -334,6 +382,8 @@ public class ReplayGlobals
                 Utilities.EaseInOut,
                 () => metadataLerping = false
             ));
+            
+            metadataHidden = false;
         }
 
         static string BuildPlayerLine(PlayerInfo[] players)
@@ -493,134 +543,731 @@ public class ReplayGlobals
         }
     }
 
-    internal static class ReplayVoices
+    public static class ReplayCrystals
     {
-        private static readonly Dictionary<int, VoiceRecorder> active = new();
-        public static bool hooked = false;
+        public static GameObject crystalPrefab;
+        public static GameObject crystalParent;
+        public static List<Crystal> Crystals = new();
+        public static Crystal heldCrystal;
+        public static bool isHeldByRight;
+
+        public static (string path, Color32 color) lastReplayColor = new();
         
-        private static void Log(string msg)
+        public static void HandleCrystals()
         {
-            Main.instance.LoggerInstance.Msg($"[ReplayVoices] {msg}");
+            const float grabRadius = 0.1f;
+
+            if (heldCrystal != null)
+            {
+                bool released = 
+                    (isHeldByRight && Calls.ControllerMap.RightController.GetGrip() < 0.5f) ||
+                    (!isHeldByRight && Calls.ControllerMap.LeftController.GetGrip() < 0.5f);
+
+                if (released)
+                {
+                    heldCrystal.Release();
+                    heldCrystal.transform.SetParent(crystalParent.transform, true);
+                    
+                    heldCrystal = null;
+                    return;
+                }
+            }
+            
+            if (heldCrystal == null)
+            {
+                if (Calls.ControllerMap.RightController.GetGrip() > 0.5f)
+                {
+                    var crystal = FindClosestCrystal(Main.instance.rightHand.position, grabRadius);
+                    if (crystal != null)
+                    {
+                        heldCrystal = crystal;
+                        isHeldByRight = true;
+                        crystal.Grab();
+                        crystal.transform.SetParent(Main.instance.rightHand.transform, true);
+                    }
+                } else if (Calls.ControllerMap.LeftController.GetGrip() > 0.5f)
+                {
+                    var crystal = FindClosestCrystal(Main.instance.leftHand.position, grabRadius);
+                    if (crystal != null)
+                    {
+                        heldCrystal = crystal;
+                        isHeldByRight = false;
+                        crystal.Grab();
+                        crystal.transform.SetParent(Main.instance.leftHand.transform, true);
+                    }
+                }
+            }
+        }
+        
+        public static void LoadCrystals()
+        {
+            string path = Path.Combine(
+                MelonEnvironment.UserDataDirectory,
+                "MatchReplays",
+                "replayCrystals.json"
+            );
+
+            CrystalState[] states = null;
+
+            if (File.Exists(path))
+            {
+                string json = File.ReadAllText(path);
+                states = JsonConvert.DeserializeObject<CrystalState[]>(json);
+            }
+
+            if (states != null)
+            {
+                Crystals = new();
+
+                foreach (var state in states)
+                    CreateCrystal().RestoreState(state);
+            }
         }
 
-        public static void Hook()
+        public static void SaveCrystals()
         {
-            if (hooked)
+            if (Crystals == null)
                 return;
+            
+            var states = new CrystalState[Crystals.Count];
 
-            hooked = true;
-            Log("Hooked into PunVoiceClient.RemoteVoiceAdded");
-
-            PunVoiceClient.instance.RemoteVoiceAdded += (Il2CppSystem.Action<RemoteVoiceLink>)((RemoteVoiceLink link) =>
+            for (int i = 0; i < Crystals.Count; i++)
             {
-                Log($"RemoteVoiceAdded | PlayerId={link.PlayerId} VoiceId={link.VoiceId}");
+                var crystal = Crystals[i];
+                if (crystal == null)
+                    continue;
                 
-                if (Main.instance.isRecording)
-                    StartRecording(link, PlayerManager.instance.AllPlayers.ToArray().FirstOrDefault(p => p.Data.GeneralData.ActorNo == link.PlayerId)?.Data.GeneralData.PublicUsername);
+                states[i] = crystal.CaptureState();
+            }
 
-                link.RemoteVoiceRemoved += (Il2CppSystem.Action)(() =>
+            string json = JsonConvert.SerializeObject(
+                states,
+                Formatting.Indented
+            );
+
+            string path = Path.Combine(
+                MelonEnvironment.UserDataDirectory,
+                "MatchReplays",
+                "replayCrystals.json"
+            );
+            
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllText(path, json);
+        }
+
+        public static Crystal FindClosestCrystal(Vector3 handPos, float maxDistance)
+        {
+            Crystal closest = null;
+            float closestSqr = maxDistance * maxDistance;
+
+            foreach (var crystal in Crystals)
+            {
+                if (crystal == null)
+                    continue;
+                
+                float sqr = (crystal.transform.position - handPos).sqrMagnitude;
+                if (sqr < closestSqr)
                 {
-                    Log($"RemoteVoiceRemoved | PlayerId={link.PlayerId}");
-                    StopRecording(link);
-                });
+                    closestSqr = sqr;
+                    closest = crystal;
+                }
+            }
+
+            return closest;
+        }
+
+        public static Crystal CreateCrystal(Vector3 position, ReplaySerializer.ReplayHeader header, bool useAnimation = false, bool applyRandomColor = false)
+        {
+            if (crystalParent == null)
+                crystalParent = new GameObject("Crystals");
+            
+            Crystal crystal = GameObject.Instantiate(crystalPrefab, crystalParent.transform).AddComponent<Crystal>();
+                
+            crystal.name = $"Crystal ({header.Title}, {header.DateUTC})";
+            crystal.transform.position = position;
+            crystal.Title = header.Title;
+
+            GameObject text = Calls.Create.NewText(header.Title, 1f, Color.white, Vector3.zero, Quaternion.identity);
+
+            text.name = "Replay Title";
+            text.transform.SetParent(crystal.transform, false);
+            text.transform.localScale = Vector3.zero;
+            text.transform.localRotation = Quaternion.Euler(0, 270, 270);
+
+            crystal.titleText = text.GetComponent<TextMeshPro>();
+            crystal.titleText.GetComponent<RectTransform>().SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, 2);
+            crystal.titleText.horizontalAlignment = HorizontalAlignmentOptions.Center;
+            crystal.titleText.ForceMeshUpdate();
+
+            var lookAt = text.AddComponent<LookAtPlayer>();
+            lookAt.lockX = true;
+            lookAt.lockZ = true;
+                    
+            crystal.ReplayPath = ReplayFiles.currentReplayPath;
+
+            if (applyRandomColor)
+            {
+                crystal.BaseColor = Utilities.RandomColor();
+                crystal.ApplyVisuals();
+            }
+            
+            crystal.gameObject.SetActive(true);
+                    
+            Crystals.Add(crystal);
+
+            if (useAnimation)
+                MelonCoroutines.Start(CrystalSpawnAnimation(crystal));
+
+            return crystal;
+        }
+
+        public static Crystal CreateCrystal()
+        {
+            if (crystalParent == null)
+                crystalParent = new GameObject("Crystals");
+            
+            Crystal crystal = GameObject.Instantiate(crystalPrefab, crystalParent.transform).AddComponent<Crystal>();
+            crystal.hasLeftTable = true;
+            crystal.gameObject.SetActive(true);
+
+            GameObject text = Calls.Create.NewText("", 1f, Color.white, Vector3.zero, Quaternion.identity);
+
+            text.name = "Replay Title";
+            text.transform.SetParent(crystal.transform, false);
+            text.transform.localScale = Vector3.zero;
+            text.transform.localRotation = Quaternion.Euler(0, 270, 270);
+
+            crystal.titleText = text.GetComponent<TextMeshPro>();
+            crystal.titleText.GetComponent<RectTransform>().SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, 2);
+            crystal.titleText.horizontalAlignment = HorizontalAlignmentOptions.Center;
+            crystal.titleText.ForceMeshUpdate();
+            
+            var lookAt = text.AddComponent<LookAtPlayer>();
+            lookAt.lockX = true;
+            lookAt.lockZ = true;
+            
+            Crystals.Add(crystal);
+
+            return crystal;
+        }
+
+        public static IEnumerator ReadCrystal(Crystal crystal)
+        {
+            crystal.isAnimation = true;
+            
+            lastReplayColor = (crystal.ReplayPath, crystal.BaseColor);
+            
+            AudioManager.instance.Play(ReplayCache.SFX["Call_GearMarket_ButtonUnpress"], crystal.transform.position);
+
+            yield return Utilities.LerpValue(
+                () => crystal.transform.position,
+                v => crystal.transform.position = v,
+                Vector3.Lerp,
+                Main.instance.replayTable.transform.position + new Vector3(0, 0.3045f, 0),
+                1f,
+                Utilities.EaseInOut
+            );
+            
+            yield return new WaitForSeconds(1f);
+
+            AudioManager.instance.Play(ReplayCache.SFX["Call_Phone_ScreenDown"], crystal.transform.position);
+            
+            yield return Utilities.LerpValue(
+                () => crystal.BaseColor,
+                v =>
+                {
+                    crystal.BaseColor = v;
+                    crystal.ApplyVisuals();
+                },
+                Color32.Lerp,
+                new(50, 50, 50, 255),
+                1f,
+                Utilities.EaseInOut
+            );
+
+            yield return new WaitForSeconds(0.5f);
+            
+            AudioManager.instance.Play(ReplayCache.SFX["Call_ToolTip_Close"], crystal.transform.position);
+
+            MelonCoroutines.Start(Utilities.LerpValue(
+                () => crystal.transform.position,
+                v => crystal.transform.position = v,
+                Vector3.Lerp,
+                Main.instance.replayTable.transform.position,
+                0.5f,
+                Utilities.EaseInOut
+            ));
+
+            yield return Utilities.LerpValue(
+                () => crystal.transform.localScale,
+                v => crystal.transform.localScale = v,
+                Vector3.Lerp,
+                Vector3.zero,
+                0.5f,
+                Utilities.EaseInOut,
+                () =>
+                {
+                    int index = ReplayFiles.replayPaths.IndexOf(crystal.ReplayPath);
+                    
+                    if (index != -1)
+                        ReplayFiles.SelectReplay(index);
+                    else
+                        AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Failure"], crystal.transform.position);
+                    
+                    Crystals.Remove(crystal);
+                    GameObject.Destroy(crystal.gameObject);
+                    SaveCrystals();
+                }
+            );
+        }
+
+        public static IEnumerator CrystalSpawnAnimation(Crystal crystal)
+        {
+            crystal.isAnimation = true;
+            
+            crystal.transform.localScale = Vector3.zero;
+            crystal.transform.position = Main.instance.replayTable.transform.position;
+
+            crystal.BaseColor = new (50, 50, 50, 255);
+            crystal.ApplyVisuals();
+
+            AudioManager.instance.Play(ReplayCache.SFX["Call_MoveSelector_Unlock"], crystal.transform.position);
+
+            MelonCoroutines.Start(Utilities.LerpValue(
+                () => crystal.transform.position,
+                v => crystal.transform.position = v,
+                Vector3.Lerp,
+                Main.instance.replayTable.transform.position + new Vector3(0, 0.3045f, 0),
+                1.5f,
+                Utilities.EaseInOut
+            ));
+
+            yield return Utilities.LerpValue(
+                () => crystal.transform.localScale,
+                v => crystal.transform.localScale = v,
+                Vector3.Lerp,
+                Vector3.one * 50f,
+                1.5f,
+                Utilities.EaseInOut
+            );
+
+            yield return new WaitForSeconds(1f);
+            
+            AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_Bake_Part"], crystal.transform.position);
+
+            MelonCoroutines.Start(Utilities.LerpValue(
+                () => crystal.BaseColor,
+                v =>
+                {
+                    crystal.BaseColor = v;
+                    crystal.ApplyVisuals();
+                },
+                Color32.Lerp,
+                !string.IsNullOrEmpty(lastReplayColor.path) && crystal.ReplayPath == lastReplayColor.path ? lastReplayColor.color : Utilities.RandomColor(),
+                0.05f,
+                Utilities.EaseInOut
+            ));
+
+            yield return Utilities.LerpValue(
+                () => crystal.transform.localRotation,
+                v => crystal.transform.localRotation = v,
+                Quaternion.Slerp,
+                Quaternion.Euler(290, 0, 0),
+                0.05f
+            );
+
+            yield return Utilities.LerpValue(
+                () => crystal.transform.localRotation,
+                v => crystal.transform.localRotation = v,
+                Quaternion.Slerp,
+                Quaternion.Euler(270, 0, 0),
+                0.7f,
+                Utilities.EaseInOut
+            );
+
+            crystal.isAnimation = false;
+        }
+        
+        [RegisterTypeInIl2Cpp]
+        public class Crystal : MonoBehaviour
+        {
+            public string ReplayPath;
+            
+            public string Title;
+            public TextMeshPro titleText;
+
+            public Color32 BaseColor;
+
+            private Renderer rend;
+            private MaterialPropertyBlock mpb;
+            
+            public bool isGrabbed;
+            public bool isAnimation;
+            public bool hasLeftTable;
+
+            private Vector3 basePosition;
+            private Vector3 velocity;
+            private Vector3 lastPosition;
+            private bool hasSavedAfterRelease;
+
+            private object scaleRoutine;
+            private object positionRoutine;
+            private bool isTextVisible;
+
+            private void Awake()
+            {
+                basePosition = transform.position;
+                lastPosition = transform.position;
+            }
+
+            public void ApplyVisuals()
+            {
+                Color baseColor = BaseColor;
+
+                rend ??= GetComponent<Renderer>();
+                mpb ??= new MaterialPropertyBlock();
+                
+                rend.GetPropertyBlock(mpb);
+                
+                mpb.SetColor("_Base_Color", baseColor);
+                mpb.SetColor("_Edge_Color", DeriveEdge(baseColor));
+                mpb.SetColor("_Shadow_Color", DeriveShadow(baseColor));
+
+                rend.SetPropertyBlock(mpb);
+            }
+
+            public CrystalState CaptureState()
+            {
+                return new CrystalState
+                {
+                    ReplayPath = ReplayPath,
+                    Title = Title,
+                    x = transform.position.x,
+                    y = transform.position.y,
+                    z = transform.position.z,
+                    BaseColor = BaseColor
+                };
+            }
+
+            public void RestoreState(CrystalState state)
+            {
+                ReplayPath = state.ReplayPath;
+                BaseColor = state.BaseColor;
+
+                basePosition = new Vector3(state.x, state.y, state.z);
+                transform.position = basePosition;
+
+                Title = state.Title;
+                titleText.text = state.Title;
+                titleText.ForceMeshUpdate();
+                
+                ApplyVisuals();
+            }
+
+            public void ShowText()
+            {
+                Animate(Vector3.one * 0.02f, new Vector3(0f, 0f, 0.0049f));
+                isTextVisible = true;
+            }
+
+            public void HideText()
+            {
+                Animate(Vector3.zero, Vector3.zero);
+                isTextVisible = false;
+            }
+
+            void Animate(Vector3 scale, Vector3 position)
+            {
+                if (scaleRoutine != null)
+                    MelonCoroutines.Stop(scaleRoutine);
+
+                scaleRoutine = MelonCoroutines.Start(
+                    Utilities.LerpValue(
+                        () => titleText.transform.localScale,
+                        v => titleText.transform.localScale = v,
+                        Vector3.Lerp,
+                        scale,
+                        0.5f,
+                        Utilities.EaseInOut
+                    )
+                );
+
+                if (positionRoutine != null)
+                    MelonCoroutines.Stop(positionRoutine);
+
+                positionRoutine = MelonCoroutines.Start(
+                    Utilities.LerpValue(
+                        () => titleText.transform.localPosition,
+                        v => titleText.transform.localPosition = v,
+                        Vector3.Lerp,
+                        position,
+                        0.5f,
+                        Utilities.EaseInOut
+                    )
+                );
+            }
+
+            public void Grab()
+            {
+                if (isGrabbed)
+                    return;
+
+                isGrabbed = true;
+                hasLeftTable = true;
+                hasSavedAfterRelease = false;
+                velocity = Vector3.zero;
+
+                HideText();
+            }
+
+            public void Release()
+            {
+                if (!isGrabbed)
+                    return;
+
+                isGrabbed = false;
+            }
+
+            void Update()
+            {
+                if (!isAnimation)
+                {
+                    if (!isGrabbed)
+                    {
+                        ApplyThrowVelocity();
+                        LerpUpright();
+                        HandleProximity();
+                    }
+                    else
+                    {
+                        basePosition = transform.position;
+                        velocity = (transform.position - lastPosition) / Time.deltaTime;
+                    }
+
+                    lastPosition = transform.position;
+                }
+                else
+                {
+                    HideText();
+                }
+            }
+
+            void HandleProximity()
+            {
+                var head = Main.instance.head;
+                if (head == null)
+                    return;
+
+                float dist = Vector3.Distance(head.position, transform.position);
+
+                const float showDist = 2f;
+                const float hideDist = 2.2f;
+
+                if (!isTextVisible && dist < showDist)
+                {
+                    isTextVisible = true;
+                    ShowText();
+                } else if (isTextVisible && dist > hideDist)
+                {
+                    isTextVisible = false;
+                    HideText();
+                }
+            }
+
+            void ApplyThrowVelocity()
+            {
+                if (velocity.sqrMagnitude < 0.001f)
+                {
+                    if (!hasSavedAfterRelease)
+                    {
+                        SaveCrystals();
+                        hasSavedAfterRelease = true;
+                    }
+
+                    velocity = Vector3.zero;
+                    return;
+                }
+
+                basePosition += velocity * Time.deltaTime;
+                velocity = Vector3.Lerp(velocity, Vector3.zero, 8f * Time.deltaTime);
+                
+                transform.position = basePosition;
+            }
+
+            void LerpUpright()
+            {
+                Quaternion target = Quaternion.Euler(-90f, 0f, 0f);
+
+                float smooth = 1f - Exp(-6f * Time.deltaTime);
+                transform.rotation = Quaternion.Slerp(
+                    transform.rotation,
+                    target,
+                    smooth
+                );
+            }
+
+            static Color DeriveEdge(Color baseColor)
+            {
+                Color.RGBToHSV(baseColor, out float h, out float s, out float v);
+                return Color.HSVToRGB(h, Clamp01(s + 0.05f), Clamp01(v + 0.35f));
+            }
+
+            static Color DeriveShadow(Color baseColor)
+            {
+                Color.RGBToHSV(baseColor, out float h, out float s, out float v);
+                return Color.HSVToRGB(h, Clamp01(s - 0.25f), Clamp01(v - 0.4f));
+            }
+        }
+
+        [Serializable]
+        public struct CrystalState
+        {
+            public string ReplayPath;
+            public string Title;
+
+            public float x;
+            public float y;
+            public float z;
+            
+            public Color32 BaseColor;
+        }
+    }
+
+    // Voice recording - UNUSED
+    // Not enabled due to Il2CPP codec limitaitons and privacy concerns
+    // Kept for future ideas
+    internal static class ReplayVoices
+    {
+        // Remote
+        private static PunVoiceClient voice;
+        
+        private static readonly Dictionary<(int playerId, int voiceId), VoiceStreamWriter> writers = new();
+        public static string tempVoiceDir = Path.Combine(MelonEnvironment.UserDataDirectory, "MatchReplays", "TempVoices");
+        
+        public static List<VoiceTrackInfo> voiceTrackInfos = new();
+
+        public static void HookRemote()
+        {
+            voice ??= PunVoiceClient.Instance;
+        
+            voice.RemoteVoiceAdded += (Il2CppSystem.Action<RemoteVoiceLink>)(OnRemoteVoiceAdded);
+        
+            Directory.CreateDirectory(tempVoiceDir);
+        }
+        
+        public static void OnRemoteVoiceAdded(RemoteVoiceLink link)
+        {
+            int playerId = link.PlayerId;
+            int voiceId = link.VoiceId;
+
+            string name = PlayerManager.instance.AllPlayers.ToArray()
+                    .FirstOrDefault(p => p.Data.GeneralData.ActorNo == playerId)?
+                    .Data.GeneralData.PublicUsername
+                ?? $"Unknown";
+
+            name = Utilities.CleanName(name);
+
+            string fileName = $"{name}_actor_{playerId}_voice_{voiceId}.ogg";
+            
+            voiceTrackInfos.Add(new VoiceTrackInfo
+            {
+                ActorId = playerId,
+                FileName = fileName,
+                StartTime = Main.instance.elapsedRecordingTime
+            });
+
+            string path = Path.Combine(
+                tempVoiceDir,
+                fileName
+            );
+
+            var writer = new VoiceStreamWriter(
+                playerId,
+                link.VoiceInfo.SamplingRate,
+                link.VoiceInfo.Channels,
+                path
+            );
+
+            var key = (playerId, voiceId);
+            writers[key] = writer;
+
+            link.FloatFrameDecoded += (Il2CppSystem.Action<FrameOut<float>>)((FrameOut<float> frame) =>
+            {
+                if (!writers.TryGetValue(key, out var w))
+                    return;
+
+                w.Write(frame.Buf);
+
+                if (frame.EndOfStream)
+                    StopWriter(key);
+            });
+
+            link.RemoteVoiceRemoved += (Il2CppSystem.Action)(() =>
+            {
+                StopWriter(key);
             });
         }
 
-        public static void StartRecording(RemoteVoiceLink link, string playerName)
+        private static void StopWriter((int playerId, int voiceId) key)
         {
-            if (active.ContainsKey(link.PlayerId))
-            {
-                Log($"Already recording PlayerId={link.PlayerId}");
+            if (!writers.Remove(key, out var writer))
                 return;
-            }
 
-            if (string.IsNullOrEmpty(playerName))
-                playerName = "Unknown";
-            
-            Log($"StartRecording | PlayerId={link.PlayerId} Name={playerName}");
+            writer.Dispose();
 
-            var recorder = new VoiceRecorder(link, playerName);
-            active.Add(link.PlayerId, recorder);
-            recorder.Start();
-        }
-        
-        public static void StopRecording(RemoteVoiceLink link)
-        {
-            if (!active.TryGetValue(link.PlayerId, out var recorder))
-            {
-                Log($"StopRecording called but no active recorder | PlayerId={link.PlayerId}");
-                return;
-            }
-            
-            Log($"StopRecording | PlayerId={link.PlayerId}");
-
-            recorder.Stop();
-            active.Remove(link.PlayerId);
+            if (!writer.HasFrames && File.Exists(writer.Path))
+                File.Delete(writer.Path);
         }
 
-        internal class VoiceRecorder
+        public class VoiceStreamWriter
         {
-            private readonly RemoteVoiceLink link;
-            private readonly string playerName;
+            public readonly int ActorId;
+            public readonly string Path;
+            public bool HasFrames { get; private set; }
 
-            private int frameCount;
+            private readonly FileStream file;
+            // private readonly OpusOggWriteStream ogg;
 
-            private readonly int sampleRate;
-            private readonly int channels;
-            
-            private WaveFileWriter writer;
-            private bool initialized;
-
-            public VoiceRecorder(RemoteVoiceLink link, string playerName)
+            public VoiceStreamWriter(
+                int actorId,
+                int sampleRate,
+                int channels,
+                string path
+            )
             {
-                this.link = link;
-                this.playerName = Utilities.CleanName(playerName);
-                sampleRate = link.VoiceInfo.SamplingRate;
-                channels = link.VoiceInfo.Channels;
-            }
+                ActorId = actorId;
+                Path = path;
 
-            public void Start()
-            {
-                Log($"Recorder start | {playerName} SR={sampleRate} C={channels}");
-                link.FloatFrameDecoded += (Il2CppSystem.Action<FrameOut<float>>)OnFrameDecoded;
-            }
-
-            public void Stop()
-            {
-                Log($"Recorder stop | {playerName} Frames={frameCount}");
-                link.FloatFrameDecoded -= (Il2CppSystem.Action<FrameOut<float>>)OnFrameDecoded;
-                writer?.Dispose();
-                writer = null;
-            }
-
-            private void OnFrameDecoded(FrameOut<float> frame)
-            {
-                if (!initialized)
-                    InitWriter(frame);
-
-                frameCount++;
-
-                if (frameCount == 1)
-                    Log($"First frame | {playerName} Samples={frame.Buf.Length}");
-
-                writer.WriteSamples(frame.Buf.ToArray(), 0, frame.Buf.Length);
-            }
-
-            private void InitWriter(FrameOut<float> frame)
-            {
-                Directory.CreateDirectory(ReplayFiles.currentReplayPath);
-
-                var path = Path.Combine(ReplayFiles.currentReplayPath, $"{playerName}.wav");
-
-                Log($"Creating WAV | {path}");
+                file = File.Create(path);
                 
-                var format = WaveFormat.CreateIeeeFloatWaveFormat(
-                    sampleRate,
-                    channels
-                );
+                // Causes system.runtime error
+                // var encoder = new OpusEncoder(
+                //     sampleRate,
+                //     channels,
+                //     OpusApplication.OPUS_APPLICATION_VOIP
+                // );
+                
+                // encoder.Bitrate = 24000;
+                // encoder.UseVBR = true;
+                // encoder.UseDTX = true;
+                // encoder.Complexity = 6;
+                //
+                // ogg = new OpusOggWriteStream(encoder, file);
+            }
 
-                writer = new WaveFileWriter(path, format);
-                initialized = true;
+            public void Write(float[] samples)
+            {
+                if (samples == null || samples.Length == 0)
+                    return;
+
+                HasFrames = true;
+                // ogg.WriteSamples(samples, 0, samples.Length);
+            }
+
+            public void Dispose()
+            {
+                // ogg.Finish();
+                file?.Dispose();
             }
         }
     }

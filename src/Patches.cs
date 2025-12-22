@@ -21,7 +21,14 @@ public class Patches
 
             var structure = __result.GetComponent<Structure>();
             if (structure != null && !Main.instance.Structures.Contains(structure))
+            {
                 Main.instance.Structures.Add(structure);
+                
+                MeshRenderer renderer = structure.GetComponentInChildren<MeshRenderer>();
+                MaterialPropertyBlock mpb = new MaterialPropertyBlock();
+                
+                Main.instance.structureRenderers.Add((renderer, mpb));
+            }
         }
     }
 

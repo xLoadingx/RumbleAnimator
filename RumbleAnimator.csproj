@@ -22,7 +22,6 @@
   
     <ItemGroup>
       <PackageReference Include="LavaGang.MelonLoader" Version="0.7.1" />
-      <PackageReference Include="NAudio" Version="2.2.1" />
     </ItemGroup>
   
     <ItemGroup>
@@ -31,6 +30,9 @@
   
     <ItemGroup>
       <None Remove="src\replayobjects" />
+    </ItemGroup>
+  
+    <ItemGroup>
       <EmbeddedResource Include="src\replayobjects" />
     </ItemGroup>
 

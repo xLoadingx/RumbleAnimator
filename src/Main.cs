@@ -722,6 +722,17 @@ namespace RumbleAnimator
             playbackPedestalStates = new PlaybackPedestalState[replayPedestals.Count];
             
             // --------------
+            
+            MelonCoroutines.Start(SpawnClones(() =>
+            {
+                replayStructures.transform.SetParent(ReplayRoot.transform);
+                replayPlayers.transform.SetParent(ReplayRoot.transform);
+                pedestalsParent.transform.SetParent(ReplayRoot.transform);
+                
+                playbackPlayerStates = new PlaybackPlayerState[PlaybackPlayers.Length];
+                
+                isPlaying = true;
+            }));
 
             if (currentReplay.Header.Scene is "Map0" or "Map1")
             {
@@ -740,20 +751,12 @@ namespace RumbleAnimator
                         yield return null;
                     }
                     
+                    foreach (var player in PlaybackPlayers)
+                        player.Controller.GetSubsystem<PlayerNameTag>().FadePlayerNameTag(false);
+                    
                     MatchHandler.instance.FadeInCombatMusic();
                 }
             }
-            
-            MelonCoroutines.Start(SpawnClones(() =>
-            {
-                replayStructures.transform.SetParent(ReplayRoot.transform);
-                replayPlayers.transform.SetParent(ReplayRoot.transform);
-                pedestalsParent.transform.SetParent(ReplayRoot.transform);
-                
-                playbackPlayerStates = new PlaybackPlayerState[PlaybackPlayers.Length];
-                
-                isPlaying = true;
-            }));
         }
 
         private IEnumerator SpawnClones(Action done = null)
@@ -860,6 +863,18 @@ namespace RumbleAnimator
         {
             isPlaying = false;
 
+            foreach (var structure in PlaybackStructures)
+            {
+                if (structure == null)
+                    continue;
+
+                var comp = structure.GetComponent<Structure>();
+                comp.indistructable = false;
+                
+                foreach (var effect in structure.GetComponentsInChildren<VisualEffect>())
+                    GameObject.Destroy(effect.gameObject);
+            }
+
             if (replayStructures != null)
                 GameObject.Destroy(replayStructures);
 
@@ -896,6 +911,7 @@ namespace RumbleAnimator
             CombatManager.instance?.CleanStructureList();
 
             PlaybackPlayers = null;
+            PlaybackStructures = null;
             replayStructures = null;
             replayPlayers = null;
             pedestalsParent = null;
@@ -1423,31 +1439,32 @@ namespace RumbleAnimator
 
                 if (state.health != pb.Health)
                 {
-                    state.health = pb.Health;
-                    
-                    playbackPlayer.Controller.GetSubsystem<PlayerHealth>().SetHealth(pb.Health, pa.Health);
+                    playbackPlayer.Controller.GetSubsystem<PlayerHealth>().SetHealth(pb.Health, (short)state.health);
                     
                     // Hit (not death)
-                    if (pb.Health < pa.Health && pb.Health != 0)
+                    if (pb.Health < state.health && pb.Health != 0 && currentReplay.Header.Scene != "Gym")
                     {
                         var hitmarker = PoolManager.instance.GetPool("PlayerHitmarker")
                             .FetchFromPool(playbackPlayer.Head.transform.position - new Vector3(0, 0.5f, 0), Quaternion.identity)
                             .Cast<PlayerHitmarker>();
 
-                        hitmarker.SetDamage(pa.Health - pb.Health);
+                        hitmarker.SetDamage(state.health - pb.Health);
                         hitmarker.gameObject.SetActive(true);
                         hitmarker.Play();
                         hitmarker.GetComponent<VisualEffect>().playRate = playbackSpeed;
                     }
+                    
+                    state.health = pb.Health;
                 }
                 
-                if (state.currentStack != pb.currentStack && pb.currentStack != (short)StackType.None)
+                if (state.currentStack != pb.currentStack)
                 {
                     state.currentStack = pb.currentStack;
                     
                     if (pb.currentStack != (short)StackType.Flick
                         && pb.currentStack != (short)StackType.HoldLeft
-                        && pb.currentStack != (short)StackType.HoldRight)
+                        && pb.currentStack != (short)StackType.HoldRight
+                        && pb.currentStack != (short)StackType.None)
                     {
                         var key = ReplayCache.NameToStackType
                             .FirstOrDefault(s => s.Value == (StackType)pb.currentStack);

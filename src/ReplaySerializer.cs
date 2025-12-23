@@ -106,61 +106,126 @@ public class ReplaySerializer
 
         public VoiceTrackInfo[] Voices;
     }
-
-    static void WriteChunk(
-        BinaryWriter bw,
-        Action<BinaryWriter> writeFields
-    )
+    
+    static bool WriteStructureDiff(BinaryWriter w, StructureState prev, StructureState curr)
     {
-        using var ms = new MemoryStream();
-        using var w = new BinaryWriter(ms);
+        bool any = false;
 
-        writeFields(w);
+        any |= WriteIf(
+            PosChanged(prev.position, curr.position),
+            () => w.Write(StructureField.position, curr.position)
+        );
 
-        byte[] chunk = ms.ToArray();
-        bw.Write(chunk.Length);
-        bw.Write(chunk);
+        any |= WriteIf(
+            RotChanged(prev.rotation, curr.rotation),
+            () => w.Write(StructureField.rotation, curr.rotation)
+        );
+
+        any |= WriteIf(
+            prev.active != curr.active,
+            () => w.Write(StructureField.active, curr.active)
+        );
+
+        any |= WriteIf(
+            prev.grounded != curr.grounded,
+            () => w.Write(StructureField.grounded, curr.grounded)
+        );
+
+        any |= WriteIf(
+            prev.isHeld != curr.isHeld,
+            () => w.Write(StructureField.isHeld, curr.isHeld)
+        );
+
+        any |= WriteIf(
+            prev.isFlicked != curr.isFlicked,
+            () => w.Write(StructureField.isFlicked, curr.isFlicked)
+        );
+
+        any |= WriteIf(
+            prev.isShaking != curr.isShaking,
+            () => w.Write(StructureField.isShaking, curr.isShaking)
+        );
+
+        return any;
     }
     
-    static void WriteStructureChunk(BinaryWriter bw, StructureState s)
+    static bool WritePlayerDiff(BinaryWriter w, PlayerState prev, PlayerState curr)
     {
-        WriteChunk(bw, w =>
-        {
-            w.Write(StructureField.position, s.position);
-            w.Write(StructureField.rotation, s.rotation);
-            w.Write(StructureField.grounded, s.grounded);
-            w.Write(StructureField.active, s.active);
-            w.Write(StructureField.isFlicked, s.isFlicked);
-            w.Write(StructureField.isHeld, s.isHeld);
-            w.Write(StructureField.isShaking, s.isShaking);
-        });
-    }
-    
-    static void WritePlayerChunk(BinaryWriter bw, PlayerState p)
-    {
-        WriteChunk(bw, w =>
-        {
-            w.Write(PlayerField.VRRigPos, p.VRRigPos);
-            w.Write(PlayerField.VRRigRot, p.VRRigRot);
-            w.Write(PlayerField.LHandPos, p.LHandPos);
-            w.Write(PlayerField.LHandRot, p.LHandRot);
-            w.Write(PlayerField.RHandPos, p.RHandPos);
-            w.Write(PlayerField.RHandRot, p.RHandRot);
-            w.Write(PlayerField.HeadPos, p.HeadPos);
-            w.Write(PlayerField.HeadRot, p.HeadRot);
-            w.Write(PlayerField.currentStack, p.currentStack);
-            w.Write(PlayerField.Health, p.Health);
-            w.Write(PlayerField.active, p.active);
-        });
+        bool any = false;
+
+        any |= WriteIf(
+            PosChanged(prev.VRRigPos, curr.VRRigPos),
+            () => w.Write(PlayerField.VRRigPos, curr.VRRigPos)
+        );
+
+        any |= WriteIf(
+            RotChanged(prev.VRRigRot, curr.VRRigRot),
+            () => w.Write(PlayerField.VRRigRot, curr.VRRigRot)
+        );
+
+        any |= WriteIf(
+            PosChanged(prev.LHandPos, curr.LHandPos),
+            () => w.Write(PlayerField.LHandPos, curr.LHandPos)
+        );
+
+        any |= WriteIf(
+            RotChanged(prev.LHandRot, curr.LHandRot),
+            () => w.Write(PlayerField.LHandRot, curr.LHandRot)
+        );
+
+        any |= WriteIf(
+            PosChanged(prev.RHandPos, curr.RHandPos),
+            () => w.Write(PlayerField.RHandPos, curr.RHandPos)
+        );
+
+        any |= WriteIf(
+            RotChanged(prev.RHandRot, curr.RHandRot),
+            () => w.Write(PlayerField.RHandRot, curr.RHandRot)
+        );
+
+        any |= WriteIf(
+            PosChanged(prev.HeadPos, curr.HeadPos),
+            () => w.Write(PlayerField.HeadPos, curr.HeadPos)
+        );
+
+        any |= WriteIf(
+            RotChanged(prev.HeadRot, curr.HeadRot),
+            () => w.Write(PlayerField.HeadRot, curr.HeadRot)
+        );
+
+        any |= WriteIf(
+            prev.currentStack != curr.currentStack,
+            () => w.Write(PlayerField.currentStack, curr.currentStack)
+        );
+
+        any |= WriteIf(
+            prev.Health != curr.Health,
+            () => w.Write(PlayerField.Health, curr.Health)
+        );
+
+        any |= WriteIf(
+            prev.active != curr.active,
+            () => w.Write(PlayerField.active, curr.active)
+        );
+
+        return any;
     }
 
-    static void WritePedestalChunk(BinaryWriter bw, PedestalState p)
+    static bool WritePedestalDiff(BinaryWriter w, PedestalState prev, PedestalState curr)
     {
-        WriteChunk(bw, w =>
-        {
-            w.Write(PedestalField.position, p.position);
-            w.Write(PedestalField.active, p.active);
-        });
+        bool any = false;
+
+        any |= WriteIf(
+            PosChanged(prev.position, curr.position),
+            () => w.Write(PedestalField.position, curr.position)
+        );
+
+        any |= WriteIf(
+            prev.active != curr.active,
+            () => w.Write(PedestalField.active, curr.active)
+        );
+
+        return any;
     }
 
     static bool PosChanged(Vector3 a, Vector3 b)
@@ -171,6 +236,18 @@ public class ReplaySerializer
     static bool RotChanged(Quaternion a, Quaternion b)
     {
         return Quaternion.Dot(a, b) < ROT_EPS_DOT;
+    }
+
+    static bool WriteIf(
+        bool condition,
+        Action write
+    )
+    {
+        if (!condition)
+            return false;
+
+        write();
+        return true;
     }
 
     public static async Task BuildReplayPackage(
@@ -257,21 +334,16 @@ public class ReplaySerializer
                 var curr = f.Structures[i];
                 var prev = lastStructureFrame[i];
 
-                bool changed =
-                    prev.active != curr.active ||
-                    prev.grounded != curr.grounded ||
-                    prev.isFlicked != curr.isFlicked ||
-                    prev.isHeld != curr.isHeld ||
-                    prev.isShaking != curr.isShaking ||
-                    PosChanged(prev.position, curr.position) ||
-                    RotChanged(prev.rotation, curr.rotation);
+                using var chunkMs = new MemoryStream();
+                using var w = new BinaryWriter(chunkMs);
 
-                if (!changed)
+                if (!WriteStructureDiff(w, prev, curr))
                     continue;
-                
+
                 entriesBw.Write((byte)ChunkType.StructureState);
                 entriesBw.Write(i);
-                WriteStructureChunk(entriesBw, curr);
+                entriesBw.Write((int)chunkMs.Length);
+                entriesBw.Write(chunkMs.ToArray());
 
                 lastStructureFrame[i] = curr;
                 entryCount++;
@@ -287,26 +359,17 @@ public class ReplaySerializer
                 var curr = f.Players[i];
                 var prev = lastPlayerFrame[i];
 
-                bool changed =
-                    PosChanged(prev.VRRigPos, curr.VRRigPos) ||
-                    RotChanged(prev.VRRigRot, curr.VRRigRot) ||
-                    PosChanged(prev.LHandPos, curr.LHandPos) ||
-                    RotChanged(prev.LHandRot, curr.LHandRot) ||
-                    PosChanged(prev.RHandPos, curr.RHandPos) ||
-                    RotChanged(prev.RHandRot, curr.RHandRot) ||
-                    PosChanged(prev.HeadPos, curr.HeadPos) ||
-                    RotChanged(prev.HeadRot, curr.HeadRot) ||
-                    prev.active != curr.active ||
-                    prev.Health != curr.Health ||
-                    prev.currentStack != curr.currentStack;
+                using var chunkMs = new MemoryStream();
+                using var w = new BinaryWriter(chunkMs);
 
-                if (!changed)
+                if (!WritePlayerDiff(w, prev, curr))
                     continue;
-
+                
                 entriesBw.Write((byte)ChunkType.PlayerState);
                 entriesBw.Write(i);
-                WritePlayerChunk(entriesBw, curr);
-
+                entriesBw.Write((int)chunkMs.Length);
+                entriesBw.Write(chunkMs.ToArray());
+                
                 lastPlayerFrame[i] = curr;
                 entryCount++;
             }
@@ -319,16 +382,16 @@ public class ReplaySerializer
                 var curr = f.Pedestals[i];
                 var prev = lastPedestalFrame[i];
 
-                bool changed =
-                    PosChanged(prev.position, curr.position) ||
-                    prev.active != curr.active;
-
-                if (!changed)
+                using var chunkMs = new MemoryStream();
+                using var w = new BinaryWriter(chunkMs);
+                
+                if (!WritePedestalDiff(w, prev, curr))
                     continue;
                 
                 entriesBw.Write((byte)ChunkType.PedestalState);
                 entriesBw.Write(i);
-                WritePedestalChunk(entriesBw, curr);
+                entriesBw.Write((int)chunkMs.Length);
+                entriesBw.Write(chunkMs.ToArray());
                 
                 lastPedestalFrame[i] = curr;
                 entryCount++;
@@ -810,4 +873,3 @@ public enum ChunkType
     StructureState,
     PedestalState
 }
-

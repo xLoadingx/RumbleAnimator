@@ -1,16 +1,20 @@
 using System.Collections.Generic;
 using HarmonyLib;
+using Il2CppRUMBLE.Audio;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Players;
+using Il2CppRUMBLE.Utilities;
 using UnityEngine;
+using UnityEngine.SceneManagement;
+using SceneManager = Il2CppRUMBLE.Managers.SceneManager;
 
 namespace RumbleAnimator;
 
 public class Patches
 {
     public static List<(string playerId, short stackId)> activations = new();
-    
+
     [HarmonyPatch(typeof(PoolManager), nameof(PoolManager.Instantiate))]
     public class Patch_PoolManager_Instantiate
     {
@@ -23,10 +27,10 @@ public class Patches
             if (structure != null && !Main.instance.Structures.Contains(structure))
             {
                 Main.instance.Structures.Add(structure);
-                
+
                 MeshRenderer renderer = structure.GetComponentInChildren<MeshRenderer>();
                 MaterialPropertyBlock mpb = new MaterialPropertyBlock();
-                
+
                 Main.instance.structureRenderers.Add((renderer, mpb));
             }
         }
@@ -61,7 +65,7 @@ public class Patches
         {
             if (!Main.instance.isRecording)
                 return;
-            
+
             string id = __instance.assignedPlayer.Data.GeneralData.PlayFabMasterId;
 
             if (Main.instance.MasterIdToIndex.TryGetValue(id, out int idx))

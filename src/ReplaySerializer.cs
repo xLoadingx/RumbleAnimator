@@ -243,10 +243,10 @@ public class ReplaySerializer
             int structureCount = replay.Header.Structures.Length;
             int playerCount = replay.Header.Players.Length;
             int pedestalCount = replay.Header.PedestalCount;
-                
-            lastStructureFrame ??= new StructureState[structureCount];
-            lastPlayerFrame ??= new PlayerState[playerCount];
-            lastPedestalFrame ??= new PedestalState[2];
+            
+            lastStructureFrame ??= Utilities.NewArray<StructureState>(structureCount);
+            lastPlayerFrame ??= Utilities.NewArray<PlayerState>(playerCount);
+            lastPedestalFrame ??= Utilities.NewArray<PedestalState>(pedestalCount);
 
             // Structures
                 

@@ -146,7 +146,7 @@ public class ReplayGlobals
             var localPlayer = PlayerManager.instance.localPlayer;
             string localPlayerName = CleanName(localPlayer.Data.GeneralData.PublicUsername);
             
-            string opponent = replayInfo.Header.Players.FirstOrDefault(p => p.MasterId != localPlayer.Data.GeneralData.PlayFabMasterId).Name;
+            string opponent = replayInfo.Header.Players.FirstOrDefault(p => p.MasterId != localPlayer.Data.GeneralData.PlayFabMasterId)?.Name;
             string opponentName = !string.IsNullOrEmpty(opponent)
                 ? CleanName(opponent)
                 : "Unknown";

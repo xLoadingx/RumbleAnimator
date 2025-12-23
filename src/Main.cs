@@ -498,6 +498,7 @@ namespace RumbleAnimator
             MasterIdToIndex.Clear();
             PlayerInfos.Clear();
             Pedestals.Clear();
+            structureRenderers.Clear();
 
             foreach (var structure in CombatManager.instance.structures)
             {
@@ -537,7 +538,8 @@ namespace RumbleAnimator
                 PlayerInfos.Add(info);
             }
 
-            Pedestals.AddRange(Utilities.EnumerateMatchPedestals());
+            if (!isPlaying)
+                Pedestals.AddRange(Utilities.EnumerateMatchPedestals());
             
             elapsedRecordingTime = 0f;
             lastRecordedTime = 0f;
@@ -612,7 +614,6 @@ namespace RumbleAnimator
                         Title = title,
                         Version = BuildInfo.Version,
                         DateUTC = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
-                        FPS = 50,
                         Scene = currentScene,
                         CustomMap = customMap,
                         FrameCount = Frames.Count,
@@ -842,14 +843,15 @@ namespace RumbleAnimator
             
             body.transform.GetChild(10).gameObject.SetActive(false);
 
-            Callback.Invoke(new Clone
-            {
-                VRRig = Overall,
-                LeftHand = LHand,
-                RightHand = RHand,
-                Head = Head,
-                Controller = newPlayer.Controller
-            });
+            var clone = newPlayer.Controller.gameObject.AddComponent<Clone>();
+
+            clone.VRRig = Overall;
+            clone.LeftHand = LHand;
+            clone.RightHand = RHand;
+            clone.Head = Head;
+            clone.Controller = newPlayer.Controller;
+            
+            Callback.Invoke(clone);
         }
 
         // We want to be very defensive here
@@ -1065,7 +1067,7 @@ namespace RumbleAnimator
                         break;
                 }
 
-                if (flickStack != null)
+                if (flickStack != null && flickStack.runningExecutions != null)
                 {
                     foreach (var exec in flickStack.runningExecutions)
                     {
@@ -1079,7 +1081,7 @@ namespace RumbleAnimator
                     }
                 }
                 
-                if (holdStack != null)
+                if (holdStack != null && holdStack.runningExecutions != null)
                 {
                     foreach (var exec in holdStack.runningExecutions)
                     {
@@ -1163,7 +1165,7 @@ namespace RumbleAnimator
                 pedestalStates[i] = new PedestalState
                 {
                     position = pedestal.transform.position,
-                    active = pedestal.activeInHierarchy
+                    active = pedestal.activeSelf
                 };
             }
 
@@ -1335,12 +1337,9 @@ namespace RumbleAnimator
                     effect.transform.localPosition = Vector3.zero;
                     effect.transform.localRotation = Quaternion.identity;
                     effect.transform.localScale = Vector3.one * vfxSize;
-                    LoggerInstance.Msg($"Added vfx {effect.name} to visualEffects");
                     effect.AddComponent<ReplayTag>();
 
                     AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Hold"], sb.position);
-                    
-                    LoggerInstance.Msg($"Held was casted on structure {playbackStructure.name}");
                 }
                 
                 // Hold ended
@@ -1515,14 +1514,18 @@ namespace RumbleAnimator
     }
 }
 
-public class Clone
+[RegisterTypeInIl2Cpp]
+public class Clone : MonoBehaviour
 {
     public GameObject VRRig;
     public GameObject LeftHand;
     public GameObject RightHand;
     public GameObject Head;
     public PlayerController Controller;
-    
+
+    public PlayerAnimator pa;
+    public PlayerMovement pm;
+
     public void ApplyInterpolatedPose(PlayerState a, PlayerState b, float t)
     {
         VRRig.transform.position = Vector3.Lerp(a.VRRigPos, b.VRRigPos, t);
@@ -1536,6 +1539,22 @@ public class Clone
         
         RightHand.transform.localPosition = Vector3.Lerp(a.RHandPos, b.RHandPos, t);
         RightHand.transform.localRotation = Quaternion.Slerp(a.RHandRot, b.RHandRot, t);
+    }
+
+    public void Update()
+    {
+        if (Controller == null)
+            return;
+
+        if (pa == null || pm == null)
+        {
+            pa = Controller.GetSubsystem<PlayerAnimator>();
+            pm = Controller.GetSubsystem<PlayerMovement>();
+        }
+
+        int state = pm.IsGrounded() ? 1 : 2;
+
+        pa.animator.SetInteger(pa.movementStateAnimatorHash, state);
     }
 }
 
@@ -1561,6 +1580,9 @@ public class TableFloat : MonoBehaviour
 
     void Update()
     {
+        if (Main.instance.head == null)
+            return;
+        
         startPos.y = Lerp(
             startPos.y, 
             targetY + (float)Main.instance.tableOffset.SavedValue, 

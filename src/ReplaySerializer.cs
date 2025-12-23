@@ -98,7 +98,6 @@ public class ReplaySerializer
         public string DateUTC;
 
         public int FrameCount;
-        public int FPS;
 
         public int PedestalCount;
 

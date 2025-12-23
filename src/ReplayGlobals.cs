@@ -412,10 +412,7 @@ public class ReplayGlobals
 
         public static TimeSpan GetDuration(ReplaySerializer.ReplayHeader header)
         {
-            if (header.FPS <= 0)
-                return TimeSpan.Zero;
-
-            double seconds = (double)header.FrameCount / header.FPS;
+            double seconds = (double)header.FrameCount / 50;
             return TimeSpan.FromSeconds(seconds);
         }
         
@@ -452,9 +449,8 @@ public class ReplayGlobals
                         $"{header.DateUTC}\n" +
                         $"Version {header.Version}\n\n" +
                         $"{(string.IsNullOrEmpty(header.CustomMap) ? Utilities.GetFriendlySceneName(header.Scene) : header.CustomMap)}\n" +
+                        $"Host: {header.Players.FirstOrDefault(p => p.WasHost)?.Name ?? "Unknown"}<#FFF>\n" +
                         $"{BuildPlayerLine(header.Players)}\n" +
-                        $"FPS: {header.FPS}\n" +
-                        $"Frames: {header.FrameCount}\n" +
                         $"Duration: {duration.Minutes}:{duration.Seconds:D2}\n\n" +
                         $"{header.Structures.Length} structure{(header.Structures.Length > 1 ? "s" : "")}";
                     ShowMetadata();

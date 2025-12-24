@@ -12,7 +12,7 @@ using BinaryReader = System.IO.BinaryReader;
 using BinaryWriter = System.IO.BinaryWriter;
 using CompressionLevel = System.IO.Compression.CompressionLevel;
 using MemoryStream = System.IO.MemoryStream;
-using ReplayVoices = RumbleAnimator.ReplayGlobals.ReplayVoices;
+using static UnityEngine.Mathf;
 
 namespace RumbleAnimator;
 
@@ -85,8 +85,8 @@ public class ReplaySerializer
 {
     public static string FileName { get; set; }
     
-    const float EPS = 0.005f;
-    const float ROT_EPS_DOT = 0.9995f;
+    const float EPS = 0.00005f;
+    const float ROT_EPS_ANGLE = 0.05f;
 
     [Serializable]
     public class ReplayHeader
@@ -105,6 +105,16 @@ public class ReplaySerializer
         public StructureInfo[] Structures;
 
         public VoiceTrackInfo[] Voices;
+    }
+    
+    static bool PosChanged(Vector3 a, Vector3 b)
+    {
+        return (a - b).sqrMagnitude > EPS * EPS;
+    }
+    
+    static bool RotChanged(Quaternion a, Quaternion b)
+    {
+        return Quaternion.Angle(a, b) > ROT_EPS_ANGLE;
     }
     
     static bool WriteStructureDiff(BinaryWriter w, StructureState prev, StructureState curr)
@@ -228,16 +238,6 @@ public class ReplaySerializer
         return any;
     }
 
-    static bool PosChanged(Vector3 a, Vector3 b)
-    {
-        return (a - b).sqrMagnitude > EPS * EPS;
-    }
-    
-    static bool RotChanged(Quaternion a, Quaternion b)
-    {
-        return Quaternion.Dot(a, b) < ROT_EPS_DOT;
-    }
-
     static bool WriteIf(
         bool condition,
         Action write
@@ -336,17 +336,17 @@ public class ReplaySerializer
 
                 using var chunkMs = new MemoryStream();
                 using var w = new BinaryWriter(chunkMs);
-
-                if (!WriteStructureDiff(w, prev, curr))
-                    continue;
-
-                entriesBw.Write((byte)ChunkType.StructureState);
-                entriesBw.Write(i);
-                entriesBw.Write((int)chunkMs.Length);
-                entriesBw.Write(chunkMs.ToArray());
-
+                
+                if (WriteStructureDiff(w, prev, curr))
+                {
+                    entriesBw.Write((byte)ChunkType.StructureState);
+                    entriesBw.Write(i);
+                    entriesBw.Write((int)chunkMs.Length);
+                    entriesBw.Write(chunkMs.ToArray());
+                    entryCount++;
+                }
+                
                 lastStructureFrame[i] = curr;
-                entryCount++;
             }
                 
             // Players
@@ -362,16 +362,16 @@ public class ReplaySerializer
                 using var chunkMs = new MemoryStream();
                 using var w = new BinaryWriter(chunkMs);
 
-                if (!WritePlayerDiff(w, prev, curr))
-                    continue;
-                
-                entriesBw.Write((byte)ChunkType.PlayerState);
-                entriesBw.Write(i);
-                entriesBw.Write((int)chunkMs.Length);
-                entriesBw.Write(chunkMs.ToArray());
+                if (WritePlayerDiff(w, prev, curr))
+                {
+                    entriesBw.Write((byte)ChunkType.PlayerState);
+                    entriesBw.Write(i);
+                    entriesBw.Write((int)chunkMs.Length);
+                    entriesBw.Write(chunkMs.ToArray());
+                    entryCount++;
+                }
                 
                 lastPlayerFrame[i] = curr;
-                entryCount++;
             }
 
             for (int i = 0; i < pedestalCount; i++)
@@ -384,17 +384,17 @@ public class ReplaySerializer
 
                 using var chunkMs = new MemoryStream();
                 using var w = new BinaryWriter(chunkMs);
-                
-                if (!WritePedestalDiff(w, prev, curr))
-                    continue;
-                
-                entriesBw.Write((byte)ChunkType.PedestalState);
-                entriesBw.Write(i);
-                entriesBw.Write((int)chunkMs.Length);
-                entriesBw.Write(chunkMs.ToArray());
+
+                if (WritePedestalDiff(w, prev, curr))
+                {
+                    entriesBw.Write((byte)ChunkType.PedestalState);
+                    entriesBw.Write(i);
+                    entriesBw.Write((int)chunkMs.Length);
+                    entriesBw.Write(chunkMs.ToArray());
+                    entryCount++;
+                }
                 
                 lastPedestalFrame[i] = curr;
-                entryCount++;
             }
 
             frameBw.Write(entryCount);
@@ -574,7 +574,7 @@ public class ReplaySerializer
                 {
                     case ChunkType.StructureState:
                     {
-                        var s = ReadStructureChunk(br);
+                        var s = ReadStructureChunk(br, lastStructures[index].Clone());
                         frame.Structures[index] = s;
                         lastStructures[index] = s;
                         break;
@@ -582,7 +582,7 @@ public class ReplaySerializer
 
                     case ChunkType.PlayerState:
                     {
-                        var p = ReadPlayerChunk(br);
+                        var p = ReadPlayerChunk(br, lastPlayers[index].Clone());
                         frame.Players[index] = p;
                         lastPlayers[index] = p;
                         break;
@@ -590,7 +590,7 @@ public class ReplaySerializer
 
                     case ChunkType.PedestalState:
                     {
-                        var p = ReadPedestalChunk(br);
+                        var p = ReadPedestalChunk(br, lastPedestals[index].Clone());
                         frame.Pedestals[index] = p;
                         lastPedestals[index] = p;
                         break;
@@ -647,11 +647,11 @@ public class ReplaySerializer
         return state;
     }
 
-    static PlayerState ReadPlayerChunk(BinaryReader br)
+    static PlayerState ReadPlayerChunk(BinaryReader br, PlayerState baseState)
     {
         return ReadChunk<PlayerState, PlayerField>(
             br,
-            () => new PlayerState(),
+            () => baseState,
             (p, id, r) =>
             {
                 switch (id)
@@ -672,11 +672,11 @@ public class ReplaySerializer
         );
     }
 
-    static StructureState ReadStructureChunk(BinaryReader br)
+    static StructureState ReadStructureChunk(BinaryReader br, StructureState baseState)
     {
         return ReadChunk<StructureState, StructureField>(
             br,
-            () => new StructureState(),
+            () => baseState,
             (s, id, r) =>
             {
                 switch (id)
@@ -693,11 +693,11 @@ public class ReplaySerializer
         );
     }
 
-    static PedestalState ReadPedestalChunk(BinaryReader br)
+    static PedestalState ReadPedestalChunk(BinaryReader br, PedestalState baseState)
     {
         return ReadChunk<PedestalState, PedestalField>(
             br,
-            () => new PedestalState(),
+            () => baseState,
             (p, id, r) =>
             {
                 switch (id)
@@ -738,6 +738,20 @@ public class StructureState
     public bool isHeld;
     public bool isFlicked;
     public bool isShaking;
+
+    public StructureState Clone()
+    {
+        return new StructureState
+        {
+            position = position,
+            rotation = rotation,
+            active = active,
+            grounded = grounded,
+            isHeld = isHeld,
+            isFlicked = isFlicked,
+            isShaking = isShaking
+        };
+    }
 }
 
 [Serializable]
@@ -790,6 +804,24 @@ public class PlayerState
 
     public short Health;
     public bool active;
+
+    public PlayerState Clone()
+    {
+        return new PlayerState
+        {
+            VRRigPos = VRRigPos,
+            VRRigRot = VRRigRot,
+            LHandPos = LHandPos,
+            LHandRot = LHandRot,
+            RHandPos = RHandPos,
+            RHandRot = RHandRot,
+            HeadPos = HeadPos,
+            HeadRot = HeadRot,
+            currentStack = currentStack,
+            Health = Health,
+            active = active
+        };
+    }
 }
 
 [Serializable]
@@ -857,6 +889,15 @@ public class PedestalState
     public Vector3 position;
     
     public bool active;
+
+    public PedestalState Clone()
+    {
+        return new PedestalState
+        {
+            position = position,
+            active = active
+        };
+    }
 }
 
 public enum PedestalField

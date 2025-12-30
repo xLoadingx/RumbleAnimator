@@ -12,8 +12,10 @@ using Il2CppPhoton.Voice;
 using Il2CppPhoton.Voice.PUN;
 using Il2CppPhoton.Voice.Unity;
 using Il2CppRUMBLE.Audio;
+using Il2CppRUMBLE.Environment.MatchFlow;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
+using Il2CppRUMBLE.Players;
 using Il2CppRUMBLE.Pools;
 using Il2CppSystem.Text;
 using Il2CppSystem.Text.RegularExpressions;
@@ -151,7 +153,7 @@ public class ReplayGlobals
                 ? CleanName(opponent)
                 : "Unknown";
 
-            string timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm-ss");
+            string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
             
             string matchFormat = $"{localPlayerName}-vs-{opponentName}_on_{sceneName}_{timestamp}.replay";
             
@@ -176,21 +178,21 @@ public class ReplayGlobals
             return arr;
         }
 
+        public static bool IsReplayClone(PlayerController controller)
+        {
+            if (controller == null || Main.instance.PlaybackPlayers == null)
+                return false;
+            
+            foreach (var clone in Main.instance.PlaybackPlayers)
+                if (clone.Controller == controller)
+                    return true;
+
+            return false;
+        }
+
         public static IEnumerable<GameObject> EnumerateMatchPedestals()
         {
-            if (Main.instance.currentScene == "Map0")
-            {
-                yield return Calls.GameObjects.Map0.Logic.Pedestals.MatchpedestalP1.GetGameObject();
-                yield return Calls.GameObjects.Map0.Logic.Pedestals.MatchpedestalP2.GetGameObject();
-                yield break;
-            }
-
-            if (Main.instance.currentScene == "Map1")
-            {
-                yield return Calls.GameObjects.Map1.Logic.Pedestals.MatchpedestalP1.GetGameObject();
-                yield return Calls.GameObjects.Map1.Logic.Pedestals.MatchpedestalP2.GetGameObject();
-                yield break;
-            }
+            return GameObject.FindObjectsOfType<Pedestal>(true).Select(p => p.gameObject);
         }
 
         public static IEnumerator LoadMap(int index, float fadeDuration = 2f, Action onLoaded = null)

@@ -6,13 +6,13 @@ using Il2CppRUMBLE.Players.Scaling;
 using Newtonsoft.Json;
 using UnityEngine;
 using System.Threading.Tasks;
+using Il2CppSystem.Collections.Generic;
 using Utilities = RumbleAnimator.ReplayGlobals.Utilities;
 using ReplayFiles = RumbleAnimator.ReplayGlobals.ReplayFiles;
 using BinaryReader = System.IO.BinaryReader;
 using BinaryWriter = System.IO.BinaryWriter;
 using CompressionLevel = System.IO.Compression.CompressionLevel;
 using MemoryStream = System.IO.MemoryStream;
-using static UnityEngine.Mathf;
 
 namespace RumbleAnimator;
 
@@ -115,6 +115,18 @@ public class ReplaySerializer
     static bool RotChanged(Quaternion a, Quaternion b)
     {
         return Quaternion.Angle(a, b) > ROT_EPS_ANGLE;
+    }
+    
+    static bool WriteIf(
+        bool condition,
+        Action write
+    )
+    {
+        if (!condition)
+            return false;
+
+        write();
+        return true;
     }
     
     static bool WriteStructureDiff(BinaryWriter w, StructureState prev, StructureState curr)
@@ -238,18 +250,28 @@ public class ReplaySerializer
         return any;
     }
 
-    static bool WriteIf(
-        bool condition,
-        Action write
-    )
+    static bool WriteEvent(BinaryWriter w, EventChunk e)
     {
-        if (!condition)
-            return false;
+        bool any = false;
 
-        write();
-        return true;
+        any |= WriteIf(
+            true,
+            () => w.Write(EventField.type, (byte)e.type)
+        );
+
+        any |= WriteIf(
+            e.position != default,
+            () => w.Write(EventField.position, e.position)
+        );
+
+        any |= WriteIf(
+            e.rotation != default,
+            () => w.Write(EventField.rotation, e.rotation)
+        );
+
+        return any;
     }
-
+    
     public static async Task BuildReplayPackage(
         string outputPath,
         ReplayInfo replay,
@@ -397,6 +419,21 @@ public class ReplaySerializer
                 lastPedestalFrame[i] = curr;
             }
 
+            for (int i = 0; i < f.Events.Length; i++)
+            {
+                using var chunkMs = new MemoryStream();
+                using var w = new BinaryWriter(chunkMs);
+
+                if (WriteEvent(w, f.Events[i]))
+                {
+                    entriesBw.Write((byte)ChunkType.Event);
+                    entriesBw.Write(i);
+                    entriesBw.Write((int)chunkMs.Length);
+                    entriesBw.Write(chunkMs.ToArray());
+                    entryCount++;
+                }
+            }
+
             frameBw.Write(entryCount);
             frameBw.Write(entriesMs.ToArray());
 
@@ -527,6 +564,7 @@ public class ReplaySerializer
         replayInfo.Header = header;
         replayInfo.Frames = ReadFrames(
             br,
+            replayInfo,
             header.FrameCount,
             header.Structures.Length,
             header.Players.Length,
@@ -538,6 +576,7 @@ public class ReplaySerializer
 
     private static Frame[] ReadFrames(
         BinaryReader br,
+        ReplayInfo info,
         int frameCount,
         int structureCount,
         int playerCount,
@@ -562,6 +601,7 @@ public class ReplaySerializer
             frame.Structures = Utilities.NewArray(structureCount, lastStructures);
             frame.Players = Utilities.NewArray(playerCount, lastPlayers);
             frame.Pedestals = Utilities.NewArray(pedestalCount, lastPedestals);
+            List<EventChunk> events = null;
             
             int entryCount = br.ReadInt32();
 
@@ -596,6 +636,16 @@ public class ReplaySerializer
                         break;
                     }
 
+                    case ChunkType.Event:
+                    {
+                        var evt = ReadEventChunk(br);
+
+                        events ??= new();
+                        events.Add(evt);
+                        
+                        break;
+                    }
+
                     default:
                     {
                         int len = br.ReadInt32();
@@ -604,6 +654,8 @@ public class ReplaySerializer
                     }
                 }
             }
+
+            frame.Events = events?.ToArray();
             
             br.BaseStream.Position = frameEnd;
 
@@ -708,6 +760,23 @@ public class ReplaySerializer
             }
         );
     }
+
+    static EventChunk ReadEventChunk(BinaryReader br)
+    {
+        return ReadChunk<EventChunk, EventField>(
+            br,
+            () => new EventChunk(),
+            (e, id, r) =>
+            {
+                switch (id)
+                {
+                    case EventField.type: e.type = (EventType)r.ReadByte(); break;
+                    case EventField.position: e.position = r.ReadVector3(); break;
+                    case EventField.rotation: e.rotation = r.ReadQuaternion(); break;
+                }
+            }
+        );
+    }
 }
 
 [Serializable]
@@ -724,6 +793,7 @@ public class Frame
     public StructureState[] Structures;
     public PlayerState[] Players;
     public PedestalState[] Pedestals;
+    public EventChunk[] Events;
 }
 
 // ------- Structure State -------
@@ -906,11 +976,35 @@ public enum PedestalField
     active
 }
 
+// ------- Event -------
+
+[Serializable]
+public class EventChunk
+{
+    public EventType type;
+    
+    // General Info
+    public Vector3 position;
+    public Quaternion rotation;
+}
+
+public enum EventType : byte
+{
+}
+
+public enum EventField
+{
+    type,
+    position,
+    rotation
+}
+
 // ------------------------
 
 public enum ChunkType
 {
     PlayerState,
     StructureState,
-    PedestalState
+    PedestalState,
+    Event
 }

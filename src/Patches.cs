@@ -1,13 +1,11 @@
 using System.Collections.Generic;
 using HarmonyLib;
-using Il2CppRUMBLE.Audio;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Players;
-using Il2CppRUMBLE.Utilities;
+using Il2CppRUMBLE.Pools;
 using UnityEngine;
-using UnityEngine.SceneManagement;
-using SceneManager = Il2CppRUMBLE.Managers.SceneManager;
+using Utilities = RumbleAnimator.ReplayGlobals.Utilities;
 
 namespace RumbleAnimator;
 
@@ -20,7 +18,7 @@ public class Patches
     {
         static void Postfix(GameObject __result)
         {
-            if (!Main.instance.isRecording)
+            if (!Main.isRecording)
                 return;
 
             var structure = __result.GetComponent<Structure>();
@@ -41,7 +39,7 @@ public class Patches
     {
         static void Postfix(PlayerController __instance)
         {
-            if (!Main.instance.isRecording)
+            if (!Main.isRecording)
                 return;
 
             string id = __instance.assignedPlayer.Data.GeneralData.PlayFabMasterId;
@@ -63,7 +61,7 @@ public class Patches
     {
         static void Prefix(PlayerController __instance)
         {
-            if (!Main.instance.isRecording)
+            if (!Main.isRecording)
                 return;
 
             string id = __instance.assignedPlayer.Data.GeneralData.PlayFabMasterId;

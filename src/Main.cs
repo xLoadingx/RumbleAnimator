@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppPhoton.Pun;
+using Il2CppRUMBLE.Environment.MatchFlow;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Networking;
@@ -60,12 +61,13 @@ namespace RumbleAnimator
         
         
         // ------ Recording ------
-        public bool isRecording = false;
+        public static bool isRecording = false;
         
         public float elapsedRecordingTime = 0f;
         private float lastRecordedTime = 0f;
         
         public List<Frame> Frames = new();
+        public List<EventChunk> Events = new();
         
         // World
         public List<Structure> Structures = new();
@@ -91,12 +93,15 @@ namespace RumbleAnimator
         
         public float elapsedPlaybackTime = 0f;
         public int currentPlaybackFrame = 0;
+
+        public GameObject playbackControls;
         
         // Roots
         public GameObject ReplayRoot;
         public GameObject replayStructures;
         public GameObject replayPlayers;
         public GameObject pedestalsParent;
+        public GameObject VFXParent;
         
         // Structures
         public GameObject[] PlaybackStructures;
@@ -112,8 +117,14 @@ namespace RumbleAnimator
         public List<GameObject> replayPedestals = new();
         public PlaybackPedestalState[] playbackPedestalStates;
         
+        // Events
+        public int lastEventFrame = -1;
+        
         // UI
         public ReplayTable replayTable;
+        
+        // VFX
+        public Dictionary<PooledMonoBehaviour, float> vfxPlaybackSpeed = new();
         
         
         
@@ -335,32 +346,7 @@ namespace RumbleAnimator
             replayTable.indexText = indexText.GetComponent<TextMeshPro>();
             replayTable.metadataText = metadataTMP;
             
-            loadReplayButtonComp.OnPressed.AddListener((UnityAction)(() =>
-            {
-                if (ReplayFiles.currentIndex != -1)
-                {
-                    if (ReplayFiles.currentHeader.Scene is "Map0" or "Map1")
-                    {
-                        ReplayFiles.HideMetadata();
-                        MelonCoroutines.Start(Utilities.LoadMap(ReplayFiles.currentHeader.Scene == "Map0" ? 3 : 4, 2.5f, () =>
-                        {
-                            LoadReplay(ReplayFiles.currentReplayPath);
-                            ReplayFiles.ShowMetadata();
-
-                            if (ReplayFiles.currentHeader.Scene == "Map1")
-                                Calls.GameObjects.Map1.Logic.SceneProcessors.GetGameObject().SetActive(false);
-                        }));
-                    }
-                    else if (ReplayFiles.currentHeader.Scene != "Park")
-                    {
-                        LoadReplay(ReplayFiles.currentReplayPath);
-                    }
-                }
-                else
-                {
-                    AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Failure"], loadReplayButton.transform.position);
-                }
-            }));
+            loadReplayButtonComp.OnPressed.AddListener((UnityAction)(() => { LoadSelectedReplay(); }));
             
             ReplayFiles.table = replayTable;
             ReplayFiles.HideMetadata();
@@ -414,9 +400,14 @@ namespace RumbleAnimator
                     AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Failure"], crystalizeButton.transform.position);
                 }
             }));
+            
+            // Playback Controls
+            
+            playbackControls = new GameObject("Playback Controls");
 
             GameObject.DontDestroyOnLoad(ReplayTable);
             GameObject.DontDestroyOnLoad(crystalPrefab);
+            GameObject.DontDestroyOnLoad(playbackControls);
             GameObject.DontDestroyOnLoad(clapperboardVFX);
             bundle.Unload(false);
         }
@@ -499,6 +490,7 @@ namespace RumbleAnimator
             PlayerInfos.Clear();
             Pedestals.Clear();
             structureRenderers.Clear();
+            Events.Clear();
 
             foreach (var structure in CombatManager.instance.structures)
             {
@@ -538,8 +530,7 @@ namespace RumbleAnimator
                 PlayerInfos.Add(info);
             }
 
-            if (!isPlaying)
-                Pedestals.AddRange(Utilities.EnumerateMatchPedestals());
+            Pedestals.AddRange(Utilities.EnumerateMatchPedestals());
             
             elapsedRecordingTime = 0f;
             lastRecordedTime = 0f;
@@ -613,7 +604,7 @@ namespace RumbleAnimator
                     {
                         Title = title,
                         Version = BuildInfo.Version,
-                        DateUTC = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
+                        DateUTC = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
                         Scene = currentScene,
                         CustomMap = customMap,
                         FrameCount = Frames.Count,
@@ -643,6 +634,69 @@ namespace RumbleAnimator
                 LoggerInstance.Error(e);
             }
         }
+
+        public void LoadSelectedReplay()
+        {
+            if (ReplayFiles.currentIndex != -1)
+            {
+                if ((ReplayFiles.currentHeader.Scene == "Map0" && currentScene != "Map0") || (ReplayFiles.currentHeader.Scene == "Map1" && currentScene != "Map1"))
+                {
+                    GameObject customMaps = GameObject.Find("CustomMultiplayerMaps");
+                    bool isCustomMap = !string.IsNullOrEmpty(ReplayFiles.currentHeader.CustomMap);
+
+                    GameObject replayCustomMap = null;
+
+                    if (isCustomMap)
+                    {
+                        if (customMaps == null)
+                        {
+                            AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Failure"], replayTable.loadButton.transform.position);
+                            LoggerInstance.Error("Selected replay uses a custom map, but custom maps are not installed. Please make sure you have the custom maps mod before loading this replay.");
+                            return;
+                        }
+
+                        replayCustomMap = customMaps.transform.Find(ReplayFiles.currentHeader.CustomMap)?.gameObject;
+
+                        if (replayCustomMap == null)
+                        {
+                            AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Failure"], replayTable.loadButton.transform.position);
+                            LoggerInstance.Error($"Could not find the custom map '{ReplayFiles.currentHeader.CustomMap}'. Please check whether it's installed.");
+                            return;
+                        }
+                    }
+                    
+                    ReplayFiles.HideMetadata();
+                    MelonCoroutines.Start(Utilities.LoadMap(ReplayFiles.currentHeader.Scene == "Map0" ? 3 : 4, 2.5f, () =>
+                    {
+                        LoadReplay(ReplayFiles.currentReplayPath);
+                        ReplayFiles.ShowMetadata();
+
+                        if (ReplayFiles.currentHeader.Scene == "Map1")
+                            Calls.GameObjects.Map1.Logic.SceneProcessors.GetGameObject().SetActive(false);
+
+                        if (isCustomMap && replayCustomMap != null)
+                        {
+                            replayCustomMap.SetActive(true);
+                            
+                            if (ReplayFiles.currentHeader.Scene == "Map0")
+                                Calls.GameObjects.Map0.Map0production.GetGameObject().SetActive(false);
+                            else if (ReplayFiles.currentHeader.Scene == "Map1")
+                                Calls.GameObjects.Map1.Map1production.GetGameObject().SetActive(false);
+                        }
+                            
+                    }));
+                }
+                else if (ReplayFiles.currentHeader.Scene != "Park")
+                {
+                    LoadReplay(ReplayFiles.currentReplayPath);
+                }
+            }
+            else
+            {
+                AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Failure"], replayTable.loadButton.transform.position);
+                LoggerInstance.Error("Could not find file");
+            }
+        }
         
         public void LoadReplay(string path)
         {
@@ -654,6 +708,9 @@ namespace RumbleAnimator
             ReplayRoot = new GameObject("Replay Root");
             pedestalsParent = new GameObject("Pedestals");
             replayPlayers = new GameObject("Replay Players");
+            
+            VFXParent = new GameObject("Replay VFX");
+            VFXParent.transform.SetParent(ReplayRoot.transform);
             
             elapsedPlaybackTime = 0f;
             currentPlaybackFrame = 0;
@@ -884,6 +941,9 @@ namespace RumbleAnimator
             if (pedestalsParent != null)
                 GameObject.Destroy(pedestalsParent);
 
+            if (VFXParent != null)
+                GameObject.Destroy(VFXParent);
+
             if (HiddenStructures != null)
             {
                 foreach (var structure in HiddenStructures)
@@ -915,6 +975,7 @@ namespace RumbleAnimator
             replayStructures = null;
             replayPlayers = null;
             pedestalsParent = null;
+            vfxPlaybackSpeed.Clear();
 
             elapsedPlaybackTime = 0f;
             currentPlaybackFrame = 0;
@@ -1181,7 +1242,7 @@ namespace RumbleAnimator
                 pedestalStates[i] = new PedestalState
                 {
                     position = pedestal.transform.position,
-                    active = pedestal.activeSelf
+                    active = pedestal.GetComponent<Pedestal>().enabled
                 };
             }
 
@@ -1190,11 +1251,30 @@ namespace RumbleAnimator
                 Time = elapsedRecordingTime, 
                 Structures = structureStates,
                 Players = playerStates,
-                Pedestals = pedestalStates
+                Pedestals = pedestalStates,
+                Events = Events.ToArray()
             };
             Frames.Add(frame);
 
             Patches.activations.Clear();
+            Events.Clear();
+        }
+
+        void SetPlaybackSpeed(float newSpeed)
+        {
+            playbackSpeed = newSpeed;
+
+            foreach (var structure in PlaybackStructures)
+            {
+                foreach (var vfx in structure.GetComponentsInChildren<VisualEffect>())
+                    vfx.playRate = newSpeed;
+            }
+
+            for (int i = 0; i < VFXParent.transform.childCount; i++)
+            {
+                var vfx = VFXParent.transform.GetChild(i);
+                vfx.GetComponent<VisualEffect>().playRate = newSpeed;
+            }
         }
         
         public void HandlePlayback()
@@ -1253,7 +1333,7 @@ namespace RumbleAnimator
                     "RockCube" => 1.5f,
                     "Wall" or "Pillar" => 2.5f,
                     
-                    "LargeRock" => 3f,
+                    "LargeRock" => 2.7f,
 
                     _ => 1f
                 };
@@ -1262,7 +1342,7 @@ namespace RumbleAnimator
                 if (!rb.isKinematic)
                     rb.isKinematic = true;
                 
-                // ------ Event Checks ------
+                // ------ State Event Checks ------
                 
                 // Structure Broke
                 if (state.active && !sb.active)
@@ -1273,12 +1353,18 @@ namespace RumbleAnimator
                             : "DustBreak_VFX"
                     );
                 
-                    PooledMonoBehaviour effect = pool.FetchFromPool(playbackStructure.transform.position, playbackStructure.transform.rotation);
+                    PooledMonoBehaviour effect = GameObject.Instantiate(pool.poolItem, VFXParent.transform);
+                    effect.transform.position = sb.position;
+                    effect.transform.rotation = Quaternion.identity;
+                    effect.gameObject.AddComponent<ReplayTag>();
+                    vfxPlaybackSpeed.Add(effect, effect.returnToPoolTime);
                     
                     AudioManager.instance.Play(
                         playbackStructure.GetComponent<Structure>().onDeathAudio, 
                         playbackStructure.transform.position
                     );
+
+                    playbackStructure.GetComponent<Structure>().onStructureDestroyed?.Invoke();
                 }
 
                 // Structure Spawned
@@ -1287,10 +1373,15 @@ namespace RumbleAnimator
                     var pool = poolManager.GetPool("DustSpawn_VFX");
 
                     var offset = playbackStructure.name is "Ball" or "Disc" ? Vector3.zero : new Vector3(0, 0.5f, 0);
-                    if (playbackStructure.name is "Wall")
+                    if (playbackStructure.name is "Wall" or "Pillar")
                         offset = new Vector3(0, -0.5f, 0);
-                    
-                    PooledMonoBehaviour effect = pool.FetchFromPool(sb.position + offset, Quaternion.identity);
+
+                    PooledMonoBehaviour effect = GameObject.Instantiate(pool.poolItem, VFXParent.transform);
+                    effect.transform.position = sb.position + offset;
+                    effect.transform.rotation = Quaternion.identity;
+                    effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
+                    effect.gameObject.AddComponent<ReplayTag>();
+                    vfxPlaybackSpeed.Add(effect, effect.returnToPoolTime);
 
                     string sfx = playbackStructure.name switch
                     {
@@ -1323,23 +1414,23 @@ namespace RumbleAnimator
                     pr.renderer.SetPropertyBlock(pr.mpb);
                 }
                 
-                // Grounded
-                if (!state.grounded && sb.grounded)
+                // Grounded state
+                if (state.grounded != sb.grounded)
                 {
+                    var structure = playbackStructure.GetComponent<Structure>();
+                    
+                    structure.processableComponent.SetCurrentState(
+                        sb.grounded ? structure.groundedState
+                            : structure.freeState
+                    );
+                    
                     var pool = poolManager.GetPool("Ground_VFX");
-                    
-                    var offset = playbackStructure.name is "Ball" or "Disc" ? Vector3.zero : new Vector3(0, -0.5f, 0);
-                    PooledMonoBehaviour effect = pool.FetchFromPool(sb.position + offset, Quaternion.identity);
-                    
-                    var structure = playbackStructure.GetComponent<Structure>();
-                    structure.processableComponent.SetCurrentState(structure.groundedState);
-                }
-
-                // Ungrounded
-                if (state.grounded && !sb.grounded)
-                {
-                    var structure = playbackStructure.GetComponent<Structure>();
-                    structure.processableComponent.SetCurrentState(structure.freeState);
+                    var effect = GameObject.Instantiate(pool.poolItem.gameObject, playbackStructure.transform);
+                    effect.transform.localPosition = Vector3.zero;
+                    effect.transform.localRotation = Quaternion.identity;
+                    effect.transform.localScale = Vector3.one * vfxSize;
+                    effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
+                    effect.AddComponent<ReplayTag>();
                 }
                 
                 state.grounded = sb.grounded;
@@ -1353,6 +1444,7 @@ namespace RumbleAnimator
                     effect.transform.localPosition = Vector3.zero;
                     effect.transform.localRotation = Quaternion.identity;
                     effect.transform.localScale = Vector3.one * vfxSize;
+                    effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
                     effect.AddComponent<ReplayTag>();
 
                     AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Hold"], sb.position);
@@ -1385,6 +1477,7 @@ namespace RumbleAnimator
                     effect.transform.localPosition = Vector3.zero;
                     effect.transform.localRotation = Quaternion.identity;
                     effect.transform.localScale = Vector3.one * vfxSize;
+                    effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
                     effect.AddComponent<ReplayTag>();
                     
                     AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Flick"], sb.position);
@@ -1410,13 +1503,19 @@ namespace RumbleAnimator
                 
                 // ------------
 
-                foreach (var visualEffect in playbackStructure.GetComponentsInChildren<ReplayTag>())
-                    visualEffect.GetComponent<VisualEffect>().playRate = playbackSpeed;
+                if (sa.active && sb.active)
+                {
+                    Vector3 pos = Vector3.Lerp(sa.position, sb.position, t);
+                    Quaternion rot = Quaternion.Slerp(sa.rotation, sb.rotation, t);
+                    playbackStructure.transform.SetPositionAndRotation(pos, rot);
+                }
+                else
+                {
+                    playbackStructure.transform.SetPositionAndRotation(sb.position, sb.rotation);
+                }
 
-                Vector3 pos = Vector3.Lerp(sa.position, sb.position, t);
-                Quaternion rot = Quaternion.Slerp(sa.rotation, sb.rotation, t);
-
-                playbackStructure.transform.SetPositionAndRotation(pos, rot);
+                foreach (var vfx in playbackStructure.GetComponentsInChildren<VisualEffect>())
+                    vfx.playRate = playbackSpeed;
             }
 
             // ------ Players ------
@@ -1441,13 +1540,17 @@ namespace RumbleAnimator
                 {
                     playbackPlayer.Controller.GetSubsystem<PlayerHealth>().SetHealth(pb.Health, (short)state.health);
                     
-                    // Hit (not death)
-                    if (pb.Health < state.health && pb.Health != 0 && currentReplay.Header.Scene != "Gym")
+                    if (pb.Health < pa.Health && pb.Health != 0)
                     {
-                        var hitmarker = PoolManager.instance.GetPool("PlayerHitmarker")
-                            .FetchFromPool(playbackPlayer.Head.transform.position - new Vector3(0, 0.5f, 0), Quaternion.identity)
-                            .Cast<PlayerHitmarker>();
+                        var pool = PoolManager.instance.GetPool("PlayerHitmarker");
+                        var effect = GameObject.Instantiate(pool.poolItem.gameObject, VFXParent.transform);
 
+                        effect.transform.localPosition = playbackPlayer.Head.transform.position - new Vector3(0, 0.5f, 0);
+                        effect.transform.localRotation = Quaternion.identity;
+                        effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
+                        effect.AddComponent<ReplayTag>();
+
+                        var hitmarker = effect.GetComponent<PlayerHitmarker>();
                         hitmarker.SetDamage(state.health - pb.Health);
                         hitmarker.gameObject.SetActive(true);
                         hitmarker.Play();
@@ -1485,6 +1588,9 @@ namespace RumbleAnimator
                 }
 
                 playbackPlayer.ApplyInterpolatedPose(pa, pb, t);
+                
+                foreach (var vfx in playbackPlayer.GetComponentsInChildren<VisualEffect>())
+                    vfx.playRate = playbackSpeed;
             }
             
             // ------ Pedestals ------
@@ -1505,6 +1611,22 @@ namespace RumbleAnimator
                 
                 Vector3 pos = Vector3.Lerp(pa.position, pb.position, t);
                 playbackPedestal.transform.position = pos;
+            }
+            
+            // ------ Events 
+
+            var events = a.Events;
+            if (events == null || lastEventFrame == currentPlaybackFrame)
+                return;
+            
+            lastEventFrame = currentPlaybackFrame;
+
+            foreach (var evt in events)
+            {
+                switch (evt.type)
+                {
+                    
+                }
             }
         }
     }

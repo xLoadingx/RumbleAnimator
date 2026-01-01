@@ -63,8 +63,8 @@ namespace RumbleAnimator
         // ------ Recording ------
         public static bool isRecording = false;
         
-        public float elapsedRecordingTime = 0f;
-        private float lastRecordedTime = 0f;
+        public static float elapsedRecordingTime = 0f;
+        private static float lastRecordedTime = 0f;
         
         public List<Frame> Frames = new();
         public List<EventChunk> Events = new();
@@ -91,8 +91,8 @@ namespace RumbleAnimator
         
         // ------ Playback ------
         
-        public float elapsedPlaybackTime = 0f;
-        public int currentPlaybackFrame = 0;
+        public static float elapsedPlaybackTime = 0f;
+        public static int currentPlaybackFrame = 0;
 
         public GameObject playbackControls;
         
@@ -137,6 +137,10 @@ namespace RumbleAnimator
         public ModSetting<bool> AutoRecordMatches = new();
         public ModSetting<bool> AutoRecordParks = new();
         public ModSetting<float> tableOffset = new();
+
+        public ModSetting<string> NameFormatPark = new();
+        public ModSetting<string> NameFormatGym = new();
+        public ModSetting<string> NameFormatMatch = new();
         
         // ------------
         
@@ -190,6 +194,7 @@ namespace RumbleAnimator
                 replayTable.metadataText.gameObject.SetActive(true);
                 
                 ReplayCrystals.LoadCrystals();
+                ReplayFiles.ReloadReplays();
             }
             else
             {
@@ -216,6 +221,26 @@ namespace RumbleAnimator
             AutoRecordParks = rumbleAnimatorMod.AddToList("Auto Record Parks", false, 0, "Automatically start recordings when you join a park.", new Tags());
 
             tableOffset = rumbleAnimatorMod.AddToList("Table Offset", 0f, "Table offset in meters.\nThe table does move with your scale, but the default might feel too low for some people.", new Tags());
+
+            const string TagHelpText =
+                "Available tags:\n" +
+                "<size=60%>{Host}\n" +
+                "{Client} - first non-host player\n" +
+                "{LocalPlayer} - the person who recorded the replay\n" +
+                "{Player#}\n" +
+                "{Scene}\n" +
+                "{Map} - same as {Scene}\n" +
+                "{DateTime}\n" +
+                "{PlayerCount} - e.g. '1 player', '3 players'\n" +
+                "{PlayerList} - Can specify how many player names are shown\n" +
+                "{Version}\n" +
+                "{StructureCount}\n" +
+                "{Duration}\n" +
+                "\nFor parameters, you can type ':' after the tag name.\nFor example, {PlayerList:3}, {DateTime:yyyyMMdd}";
+            
+            NameFormatPark = rumbleAnimatorMod.AddToList("Auto-Name - Park", "{Host} - {Scene}\n<scale=85%>{PlayerCount}", "The automatic naming format for Park.\n\n" + TagHelpText, new Tags());
+            NameFormatGym = rumbleAnimatorMod.AddToList("Auto-Name - Gym", "{Host} - {Scene}", "The automatic naming format for Gym.\n\n" + TagHelpText, new Tags());
+            NameFormatMatch = rumbleAnimatorMod.AddToList("Auto-Name - Match", "{Host} vs {Client} - {Scene}", "The automatic naming format for matches.\n\n" + TagHelpText, new Tags());
             
             rumbleAnimatorMod.GetFromFile();
             
@@ -361,6 +386,18 @@ namespace RumbleAnimator
             clapperboardVFX.transform.GetChild(0).GetComponent<Renderer>().material = clapperboardMat;
             clapperboardVFX.SetActive(false);
 
+            GameObject vfx = GameObject.Instantiate(PoolManager.instance.GetPool("Stubbornstone_VFX").poolItem.gameObject, ReplayTable.transform);
+
+            vfx.name = "Crystalize VFX";
+            vfx.transform.localScale = Vector3.one * 0.2f;
+            vfx.transform.localPosition = new Vector3(0, 0, 0.3045f);
+            vfx.SetActive(true);
+
+            VisualEffect vfxComp = vfx.GetComponent<VisualEffect>();
+            vfxComp.playRate = 0.6f;
+            
+            ReplayCrystals.crystalizeVFX = vfxComp;
+
             GameObject crystalPrefab = GameObject.Instantiate(bundle.LoadAsset<GameObject>("Crystal"));
             
             crystalPrefab.transform.localScale *= 0.5f;
@@ -390,7 +427,7 @@ namespace RumbleAnimator
             {
                 if (!ReplayCrystals.Crystals.Any(c => c != null && c.ReplayPath == ReplayFiles.currentReplayPath) && ReplayFiles.currentHeader != null)
                 {
-                    AudioManager.instance.Play(ReplayCache.SFX["Call_Shiftstone_Use"], crystalizeButton.transform.position);
+                    AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_Bake_Part"], crystalizeButton.transform.position);
                     
                     var header = ReplayFiles.currentHeader;
                     ReplayCrystals.CreateCrystal(replayTable.transform.position + new Vector3(0, 0.3f, 0), header, true);
@@ -577,32 +614,16 @@ namespace RumbleAnimator
                             }
                     });
                 }
-
-                var hostPlayer = PlayerInfos.FirstOrDefault(p => p.WasHost);
-                string hostName = hostPlayer?.Name ?? PlayerInfos.FirstOrDefault()?.Name ?? "Unknown";
-
+                
                 string customMap = Utilities.GetActiveCustomMapName();
                 string sceneName = string.IsNullOrWhiteSpace(customMap)
                     ? Utilities.GetFriendlySceneName(currentScene)
                     : customMap;
 
-                string title = currentScene switch
-                {
-                    "Park" =>
-                        $"{hostName}<#FFF> - Park\n" + $"<size=85%>{PlayerInfos.Count} Player{(PlayerInfos.Count != 1 ? "s" : "")}",
-
-                    _ when PlayerInfos.Count == 2 && currentScene != "Gym" =>
-                        $"{PlayerInfos[0].Name}<#FFF> vs {PlayerInfos[1].Name}<#FFF> - {sceneName}",
-
-                    _ =>
-                        $"{hostName}<#FFF> - {sceneName}"
-                };
-
                 var replayInfo = new ReplayInfo
                 {
                     Header = new ReplaySerializer.ReplayHeader
                     {
-                        Title = title,
                         Version = BuildInfo.Version,
                         DateUTC = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
                         Scene = currentScene,
@@ -614,6 +635,16 @@ namespace RumbleAnimator
                     },
                     Frames = Frames.ToArray()
                 };
+                
+                string pattern = sceneName switch
+                {
+                    "Gym" => (string)NameFormatGym.SavedValue,
+                    "Park" => (string)NameFormatPark.SavedValue,
+                    "Pit" or "Ring" => (string)NameFormatMatch.SavedValue,
+                    _ => "{Scene} - {DateTime}"
+                };
+
+                replayInfo.Header.Title = ReplaySerializer.FormatReplayString(pattern, replayInfo.Header);
 
                 LoggerInstance.Msg($"Recording stopped after {elapsedRecordingTime:F2}s ({Frames.Count} frames)");
 
@@ -625,6 +656,9 @@ namespace RumbleAnimator
                     {
                         AudioManager.instance.Play(ReplayCache.SFX["Call_PoseGhost_PosePerformed"], PlayerManager.instance.localPlayer.Controller.GetSubsystem<PlayerVR>().transform.position);
                         LoggerInstance.Msg($"Replay saved to disk: '{path}'");
+
+                        if (currentScene == "Gym")
+                            ReplayFiles.ReloadReplays();
                     }
                 );
             }
@@ -752,6 +786,24 @@ namespace RumbleAnimator
             }
 
             playbackStructureStates = new PlaybackStructureState[PlaybackStructures.Length];
+
+            for (int i = 0; i < PlaybackStructures.Length; i++)
+            {
+                var structure = PlaybackStructures[i];
+                var name = structure.name;
+
+                bool grounded = name switch
+                {
+                    "Ball" => false,
+                    "Disc" => false,
+                    _ => true
+                };
+
+                playbackStructureStates[i] = new PlaybackStructureState
+                {
+                    grounded = grounded
+                };
+            }
             
             // ------ Players ------
 
@@ -1321,6 +1373,7 @@ namespace RumbleAnimator
             for (int i = 0; i < PlaybackStructures.Length; i++)
             {
                 var playbackStructure = PlaybackStructures[i];
+                var structureComp = playbackStructure.GetComponent<Structure>();
                 var sa = a.Structures[i];
                 var sb = b.Structures[i];
                 var poolManager = PoolManager.instance;
@@ -1354,7 +1407,7 @@ namespace RumbleAnimator
                     );
                 
                     PooledMonoBehaviour effect = GameObject.Instantiate(pool.poolItem, VFXParent.transform);
-                    effect.transform.position = sb.position;
+                    effect.transform.position = sa.position;
                     effect.transform.rotation = Quaternion.identity;
                     effect.gameObject.AddComponent<ReplayTag>();
                     vfxPlaybackSpeed.Add(effect, effect.returnToPoolTime);
@@ -1373,8 +1426,6 @@ namespace RumbleAnimator
                     var pool = poolManager.GetPool("DustSpawn_VFX");
 
                     var offset = playbackStructure.name is "Ball" or "Disc" ? Vector3.zero : new Vector3(0, 0.5f, 0);
-                    if (playbackStructure.name is "Wall" or "Pillar")
-                        offset = new Vector3(0, -0.5f, 0);
 
                     PooledMonoBehaviour effect = GameObject.Instantiate(pool.poolItem, VFXParent.transform);
                     effect.transform.position = sb.position + offset;
@@ -1417,23 +1468,30 @@ namespace RumbleAnimator
                 // Grounded state
                 if (state.grounded != sb.grounded)
                 {
-                    var structure = playbackStructure.GetComponent<Structure>();
-                    
-                    structure.processableComponent.SetCurrentState(
-                        sb.grounded ? structure.groundedState
-                            : structure.freeState
+                    structureComp.processableComponent.SetCurrentState(
+                        sb.grounded ? structureComp.groundedState
+                            : structureComp.freeState
                     );
+
+                    var offset = playbackStructure.name switch
+                    {
+                        "RockCube" => 0.5f,
+                        "Wall" => 1f,
+                        "Pillar" => 1f,
+                        "LargeRock" => 0.7f,
+                        _ => 0f
+                    };
                     
-                    var pool = poolManager.GetPool("Ground_VFX");
-                    var effect = GameObject.Instantiate(pool.poolItem.gameObject, playbackStructure.transform);
-                    effect.transform.localPosition = Vector3.zero;
+                    var pool = poolManager.GetPool(sb.grounded ? "Ground_VFX" : "Unground_VFX");
+                    var effect = GameObject.Instantiate(pool.poolItem.gameObject, VFXParent.transform);
+                    effect.transform.localPosition = sb.position - new Vector3(0f, offset, 0f);
                     effect.transform.localRotation = Quaternion.identity;
-                    effect.transform.localScale = Vector3.one * vfxSize;
+                    effect.transform.localScale = Vector3.one;
                     effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
                     effect.AddComponent<ReplayTag>();
                 }
                 
-                state.grounded = sb.grounded;
+                state.grounded = structureComp.IsGrounded;
                 
                 // Hold started
                 if (!state.isHeld && sb.isHeld)
@@ -1447,7 +1505,7 @@ namespace RumbleAnimator
                     effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
                     effect.AddComponent<ReplayTag>();
 
-                    AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Hold"], sb.position);
+                    AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Hold"], sa.position);
                 }
                 
                 // Hold ended
@@ -1480,7 +1538,7 @@ namespace RumbleAnimator
                     effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
                     effect.AddComponent<ReplayTag>();
                     
-                    AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Flick"], sb.position);
+                    AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Flick"], sa.position);
                 }
 
                 // Flick ended
@@ -1556,9 +1614,9 @@ namespace RumbleAnimator
                         hitmarker.Play();
                         hitmarker.GetComponent<VisualEffect>().playRate = playbackSpeed;
                     }
-                    
-                    state.health = pb.Health;
                 }
+                
+                state.health = playbackPlayer.Controller.assignedPlayer.Data.HealthPoints;
                 
                 if (state.currentStack != pb.currentStack)
                 {

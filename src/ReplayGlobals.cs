@@ -25,6 +25,7 @@ using MelonLoader.Utils;
 using Newtonsoft.Json;
 using RumbleModdingAPI;
 using UnityEngine;
+using UnityEngine.VFX;
 using static UnityEngine.Mathf;
 using Random = UnityEngine.Random;
 
@@ -276,7 +277,6 @@ public class ReplayGlobals
         public static void Init()
         {
             Directory.CreateDirectory(replayFolder);
-            LoadReplays();
             
             Task.Run(() =>
             {
@@ -285,6 +285,44 @@ public class ReplayGlobals
             });
             
             StartWatchingReplays();
+            EnsureDefaultMetadataFormats();
+        }
+
+        public static void EnsureDefaultMetadataFormats()
+        {
+            void WriteIfNotExists(string fileName, string contents)
+            {
+                string path = Path.Combine(replayFolder, "MetadataFormats", fileName);
+                if (!File.Exists(path))
+                    File.WriteAllText(path, contents);
+            }
+
+            string folder = Path.Combine(replayFolder, "MetadataFormats");
+            Directory.CreateDirectory(folder);
+            
+            WriteIfNotExists("metadata_gym.txt", "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\nDuration: {Duration}\n\n{StructureCount}");
+            WriteIfNotExists("metadata_park.txt", "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\nHost: {Host}\n{PlayerList:3}\nDuration: {Duration}\n\n{StructureCount}");
+            WriteIfNotExists("metadata_match.txt", "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\nHost: {Host}\nDuration: {Duration}\n\n{StructureCount}");
+        }
+
+        public static string GetExternalFormatOrDefault(string fileName)
+        {
+            string path = Path.Combine(replayFolder, "MetadataFormats", fileName);
+            return File.ReadAllText(path);
+        }
+
+        public static string GetMetadataFormat(string scene)
+        {
+            return scene switch
+            {
+                "Gym" => GetExternalFormatOrDefault("metadata_gym.txt"),
+
+                "Park" => GetExternalFormatOrDefault("metadata_park.txt"),
+
+                "Map0" or "Map1" => GetExternalFormatOrDefault("metadata_match.txt"),
+
+                _ => "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\nDuration: {Duration}\n\n{StructureCount}"
+            };
         }
 
         public static ReplaySerializer.ReplayHeader GetCachedManifest(string path)
@@ -296,7 +334,19 @@ public class ReplayGlobals
             }
 
             if (string.IsNullOrEmpty(header.Title))
-                header.Title = ReplaySerializer.BuildTitle(header);
+            {
+                string scene = header.Scene;
+
+                string pattern = scene switch
+                {
+                    "Gym" => (string)Main.instance.NameFormatGym.SavedValue,
+                    "Park" => (string)Main.instance.NameFormatPark.SavedValue,
+                    "Map0" or "Map1" => (string)Main.instance.NameFormatMatch.SavedValue,
+                    _ => "{Scene} - {DateTime}"
+                };
+
+                header.Title = ReplaySerializer.FormatReplayString(pattern, header);
+            }
             
             return header;
         }
@@ -388,12 +438,10 @@ public class ReplayGlobals
             metadataHidden = false;
         }
 
-        static string BuildPlayerLine(PlayerInfo[] players)
+        public static string BuildPlayerLine(PlayerInfo[] players, int maxNames)
         {
-            if (players == null || players.Length <= 2)
+            if (players == null || players.Length == 0)
                 return string.Empty;
-
-            const int maxNames = 3;
 
             int count = players.Length;
             int shown = Math.Min(count, maxNames);
@@ -408,7 +456,7 @@ public class ReplayGlobals
                 line += $" +{count - maxNames} others";
 
             return
-                $"{count} players\n" +
+                $"{count} player{(count == 1 ? "" : "s")}\n" +
                 $"{line}\n";
         }
 
@@ -427,7 +475,7 @@ public class ReplayGlobals
                 currentIndex = -1;
                 currentReplayPath = null;
                 table.replayNameText.text = "No Replay Selected";
-                table.replayNameText.text = "No Replay Selected";
+                table.indexText.text = $"(0 / {replayPaths.Count})";
                 HideMetadata();
             }
             else
@@ -435,7 +483,8 @@ public class ReplayGlobals
                 currentIndex = index;
                 currentReplayPath = replayPaths[index];
 
-                table.indexText.text = $"({currentIndex + 1} / {replayPaths.Count})";
+                int shownIndex = currentIndex < 0 ? 0 : currentIndex + 1;
+                table.indexText.text = $"({shownIndex} / {replayPaths.Count})";
 
                 try
                 {
@@ -445,16 +494,8 @@ public class ReplayGlobals
                         ? Path.GetFileNameWithoutExtension(currentReplayPath)
                         : header.Title;
 
-                    var duration = GetDuration(header);
-                    table.metadataText.text = 
-                        $"{header.Title}\n" +
-                        $"{header.DateUTC}\n" +
-                        $"Version {header.Version}\n\n" +
-                        $"{(string.IsNullOrEmpty(header.CustomMap) ? Utilities.GetFriendlySceneName(header.Scene) : header.CustomMap)}\n" +
-                        $"Host: {header.Players.FirstOrDefault(p => p.WasHost)?.Name ?? "Unknown"}<#FFF>\n" +
-                        $"{BuildPlayerLine(header.Players)}\n" +
-                        $"Duration: {duration.Minutes}:{duration.Seconds:D2}\n\n" +
-                        $"{header.Structures.Length} structure{(header.Structures.Length > 1 ? "s" : "")}";
+                    var format = GetMetadataFormat(header.Scene);
+                    table.metadataText.text = ReplaySerializer.FormatReplayString(format, header);
                     ShowMetadata();
                 }
                 catch
@@ -480,9 +521,9 @@ public class ReplayGlobals
         {
             if (replayPaths.Count == 0) return;
 
-            int nextIndex = currentIndex == -1
-                ? 0
-                : (currentIndex + 1) % replayPaths.Count;
+            int nextIndex = currentIndex + 1;
+            if (nextIndex > replayPaths.Count - 1)
+                nextIndex = -1;
 
             SelectReplay(nextIndex);
         }
@@ -491,9 +532,9 @@ public class ReplayGlobals
         {
             if (replayPaths.Count == 0) return;
 
-            int previousIndex = currentIndex == -1
-                ? replayPaths.Count - 1
-                : (currentIndex -1 + replayPaths.Count) % replayPaths.Count;
+            int previousIndex = currentIndex - 1;
+            if (previousIndex < -1)
+                previousIndex = replayPaths.Count - 1;
             
             SelectReplay(previousIndex);
         }
@@ -506,6 +547,8 @@ public class ReplayGlobals
                 .ToList();
 
             currentIndex = Clamp(currentIndex, -1, replayPaths.Count - 1);
+
+            SelectReplay(currentIndex);
         }
 
         public static void ReloadReplays()
@@ -548,6 +591,8 @@ public class ReplayGlobals
         public static List<Crystal> Crystals = new();
         public static Crystal heldCrystal;
         public static bool isHeldByRight;
+        
+        public static VisualEffect crystalizeVFX;
 
         public static (string path, Color32 color) lastReplayColor = new();
         
@@ -851,7 +896,9 @@ public class ReplayGlobals
 
             yield return new WaitForSeconds(1f);
             
-            AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_Bake_Part"], crystal.transform.position);
+            AudioManager.instance.Play(ReplayCache.SFX["Call_Shiftstone_Use"], crystal.transform.position);
+            
+            crystalizeVFX.Play();
 
             MelonCoroutines.Start(Utilities.LerpValue(
                 () => crystal.BaseColor,
@@ -1171,7 +1218,7 @@ public class ReplayGlobals
             {
                 ActorId = playerId,
                 FileName = fileName,
-                StartTime = Main.instance.elapsedRecordingTime
+                StartTime = Main.elapsedRecordingTime
             });
 
             string path = Path.Combine(

@@ -1,7 +1,9 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using Il2CppRUMBLE.Players.Scaling;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -280,37 +282,24 @@ public class ReplaySerializer
     {
         byte[] rawReplay = SerializeReplayFile(replay);
 
+        byte[] compressedReplay = await Task.Run(() => Compress(rawReplay));
+
         string manifestJson = JsonConvert.SerializeObject(
             replay.Header,
             Formatting.Indented
         );
-
-        await Task.Run(() =>
+        
+        using (var fs = new FileStream(outputPath, FileMode.Create))
+        using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
         {
-            byte[] compressedReplay = Compress(rawReplay);
+            var manifestEntry = zip.CreateEntry("manifest.json", CompressionLevel.Optimal);
+            using (var writer = new StreamWriter(manifestEntry.Open()))
+                writer.Write(manifestJson);
 
-            using (var fs = new FileStream(outputPath, FileMode.Create))
-            {
-                using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
-                {
-                    var manifestEntry = zip.CreateEntry(
-                        "manifest.json",
-                        CompressionLevel.Optimal
-                    );
-
-                    using (var writer = new StreamWriter(manifestEntry.Open()))
-                        writer.Write(manifestJson);
-
-                    var replayEntry = zip.CreateEntry(
-                        "replay",
-                        CompressionLevel.NoCompression
-                    );
-
-                    using (var stream = replayEntry.Open())
-                        stream.Write(compressedReplay);
-                };
-            };
-        });
+            var replayEntry = zip.CreateEntry("replay", CompressionLevel.NoCompression);
+            using (var stream = replayEntry.Open())
+                stream.Write(compressedReplay, 0, compressedReplay.Length);
+        }    
         
         done?.Invoke();
     }
@@ -448,10 +437,15 @@ public class ReplaySerializer
     
     public static byte[] Compress(byte[] data)
     {
-        using var ms = new MemoryStream();
-        using (var brotli = new BrotliStream(ms, CompressionLevel.Optimal))
-            brotli.Write(data, 0, data.Length);
-        return ms.ToArray();
+        using (var ms = new MemoryStream())
+        {
+            using (var brotli = new BrotliStream(ms, CompressionLevel.Optimal, leaveOpen: true))
+            {
+                brotli.Write(data, 0, data.Length);
+            }
+
+            return ms.ToArray();
+        }
     }
 
     public static byte[] Decompress(byte[] compressed)
@@ -463,20 +457,62 @@ public class ReplaySerializer
         return output.ToArray();
     }
 
-    public static string BuildTitle(ReplayHeader header)
+    public static string FormatReplayString(string pattern, ReplayHeader header)
     {
-        string scene = Utilities.GetFriendlySceneName(header.Scene);
-        string customMap = header.CustomMap;
+        var scene = Utilities.GetFriendlySceneName(header.Scene);
+        var customMap = header.CustomMap;
+        var finalScene = string.IsNullOrEmpty(customMap) ? scene : customMap;
+        var parsedDate = DateTime.Parse(header.DateUTC);
+        var duration = ReplayFiles.GetDuration(header);
+        
+        string GetPlayer(int index) =>
+            index >= 0 && index < header.Players?.Length ? $"<#FFF>{header.Players[index].Name}<#FFF>" : "";
 
-        string finalScene = string.IsNullOrEmpty(customMap) ? scene : customMap;
-
-        return header.Players?.Length switch
+        var values = new System.Collections.Generic.Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
         {
-            2 when scene != "Park" => $"{header.Players[0].Name}<#FFF> vs {header.Players[1].Name}<#FFF> - {finalScene}",
-            > 0 when scene == "Park" => $"{header.Players[0].Name}<#FFF> - {scene}\n<scale=85%>{header.Players.Length} player{(header.Players.Length > 1 ? "s" : "")}",
-            1 => $"{header.Players[0]} - {finalScene}",
-            _ => $"{finalScene} - {header.DateUTC}"
+            ["Host"] = $"<#FFF>{header.Players?.FirstOrDefault(p => p.WasHost)?.Name ?? ""}<#FFF>",
+            ["Client"] = $"<#FFF>{header.Players?.FirstOrDefault(p => !p.WasHost)?.Name ?? ""}<#FFF>",
+            ["LocalPlayer"] = header.Players?[0]?.Name ?? "",
+            ["Scene"] = finalScene,
+            ["Map"] = finalScene,
+            ["DateTime"] = parsedDate,
+            ["PlayerCount"] = $"{header.Players?.Length ?? 0} Player{((header.Players?.Length ?? 0) == 1 ? "" : "s")}",
+            ["Version"] = header.Version ?? "",
+            ["StructureCount"] = (header.Structures?.Length.ToString() ?? "0") + " Structure" + ((header.Structures?.Length ?? 0) == 1 ? "" : "s"),
+            ["Title"] = header.Title,
+            ["Duration"] = $"{duration.Minutes}:{duration.Seconds:D2}"
         };
+
+        for (int i = 0; i < (header.Players?.Length ?? 0); i++)
+            values[$"Player{i + 1}"] = GetPlayer(i);
+
+        var regex = new Regex(@"\{(\w+)(?::([^}]+))?\}");
+
+        return regex.Replace(pattern, match =>
+        {
+            var key = match.Groups[1].Value;
+            var param = match.Groups[2].Success ? match.Groups[2].Value : null;
+
+            if (key.Equals("PlayerList", StringComparison.OrdinalIgnoreCase))
+            {
+                int count = 3;
+
+                if (!string.IsNullOrEmpty(param) && int.TryParse(param, out int parsed))
+                    count = parsed;
+
+                if (header.Players != null)
+                    return ReplayFiles.BuildPlayerLine(header.Players, count);
+            }
+
+            if (values.TryGetValue(key, out var val))
+            {
+                if (val is DateTime dateTime && param != null)
+                    return dateTime.ToString(param);
+                return val.ToString();
+            }
+
+            return match.Value;
+        });
     }
 
     public static ReplayHeader GetManifest(string path)

@@ -63,7 +63,6 @@ namespace RumbleAnimator
         
         // ------ Recording ------
         public static bool isRecording = false;
-        public bool hasSetupRecordingData = false;
         
         public static float elapsedRecordingTime = 0f;
         private static float lastRecordedFrameTime = 0f;
@@ -593,9 +592,6 @@ namespace RumbleAnimator
 
         public void SetupRecordingData()
         {
-            if (hasSetupRecordingData) return;
-            hasSetupRecordingData = true;
-
             RecordedPlayers.Clear();
             Structures.Clear();
             MasterIdToIndex.Clear();
@@ -830,7 +826,7 @@ namespace RumbleAnimator
         
         public void LoadReplay(string path)
         {
-            if (currentScene == "Park" && (PhotonNetwork.CurrentRoom.PlayerCount > 1 || PhotonNetwork.CurrentRoom.IsVisible)) // Temporarily 
+            if (currentScene == "Park" && (PhotonNetwork.CurrentRoom?.PlayerCount > 1 || (PhotonNetwork.CurrentRoom?.IsVisible ?? false))) // Temporarily 
                 return;
             
             currentReplay = ReplaySerializer.LoadReplay(path);
@@ -1496,19 +1492,19 @@ namespace RumbleAnimator
             foreach (var structure in PlaybackStructures)
             {
                 foreach (var vfx in structure.GetComponentsInChildren<VisualEffect>())
-                    vfx.playRate = newSpeed;
+                    vfx.playRate = Abs(newSpeed);
             }
 
             for (int i = 0; i < VFXParent.transform.childCount; i++)
             {
                 var vfx = VFXParent.transform.GetChild(i);
-                vfx.GetComponent<VisualEffect>().playRate = newSpeed;
+                vfx.GetComponent<VisualEffect>().playRate = Abs(newSpeed);
             }
 
             foreach (var pedestal in Pedestals)
             {
                 foreach (var vfx in pedestal.GetComponentsInChildren<VisualEffect>())
-                    vfx.playRate = newSpeed;
+                    vfx.playRate = Abs(newSpeed);
             }
         }
         

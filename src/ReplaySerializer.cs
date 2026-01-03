@@ -314,7 +314,7 @@ public class ReplaySerializer
         PlayerState[] lastPlayerFrame = null;
         PedestalState[] lastPedestalFrame = null;
 
-        foreach (var f in Main.instance.Frames)
+        foreach (var f in replay.Frames)
         {
             using var frameMs = new MemoryStream();
             using var frameBw = new BinaryWriter(frameMs);
@@ -471,7 +471,7 @@ public class ReplaySerializer
         {
             ["Host"] = $"<#FFF>{header.Players?.FirstOrDefault(p => p.WasHost)?.Name ?? ""}<#FFF>",
             ["Client"] = $"<#FFF>{header.Players?.FirstOrDefault(p => !p.WasHost)?.Name ?? ""}<#FFF>",
-            ["LocalPlayer"] = header.Players?[0]?.Name ?? "",
+            ["LocalPlayer"] = $"<#FFF>{header.Players?[0]?.Name}<#FFF>",
             ["Scene"] = finalScene,
             ["Map"] = finalScene,
             ["DateTime"] = parsedDate,
@@ -672,15 +672,15 @@ public class ReplaySerializer
                         break;
                     }
 
-                    case ChunkType.Event:
-                    {
-                        var evt = ReadEventChunk(br);
-
-                        events ??= new();
-                        events.Add(evt);
-                        
-                        break;
-                    }
+                    // case ChunkType.Event:
+                    // {
+                    //     var evt = ReadEventChunk(br);
+                    //
+                    //     events ??= new();
+                    //     events.Add(evt);
+                    //     
+                    //     break;
+                    // }
 
                     default:
                     {

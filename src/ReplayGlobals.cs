@@ -328,7 +328,7 @@ public class ReplayGlobals
             WriteIfNotExists("MetadataFormats/metadata_match.txt", TagHelpText + "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\nHost: {Host}\nDuration: {Duration}\n\n{StructureCount}");
             
             WriteIfNotExists("AutoNameFormats/gym.txt", TagHelpText + "{LocalPlayer} - {Scene}");
-            WriteIfNotExists("AutoNameFormats/park.txt", TagHelpText + "{Host} - {Scene}\n<scale=85%>{PlayerCount}</scale>");
+            WriteIfNotExists("AutoNameFormats/park.txt", TagHelpText + "{Host} - {Scene}\n");
             WriteIfNotExists("AutoNameFormats/match.txt", TagHelpText + "{Host} vs {Client} - {Scene}");
         }
 

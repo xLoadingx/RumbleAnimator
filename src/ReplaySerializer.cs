@@ -97,16 +97,15 @@ public class ReplaySerializer
         public string CustomMap;
         public string Version;
         public string Scene;
-        public string DateUTC;
+        public string Date;
+        public float Duration;
 
         public int FrameCount;
-
         public int PedestalCount;
+        public int TargetFPS;
 
         public PlayerInfo[] Players;
         public StructureInfo[] Structures;
-
-        public VoiceTrackInfo[] Voices;
     }
     
     static bool PosChanged(Vector3 a, Vector3 b)
@@ -462,8 +461,8 @@ public class ReplaySerializer
         var scene = Utilities.GetFriendlySceneName(header.Scene);
         var customMap = header.CustomMap;
         var finalScene = string.IsNullOrEmpty(customMap) ? scene : customMap;
-        var parsedDate = DateTime.Parse(header.DateUTC);
-        var duration = ReplayFiles.GetDuration(header);
+        var parsedDate = DateTime.Parse(header.Date);
+        var duration = TimeSpan.FromSeconds(header.Duration);
         
         string GetPlayer(int index) =>
             index >= 0 && index < header.Players?.Length ? $"<#FFF>{header.Players[index].Name}<#FFF>" : "";
@@ -480,7 +479,8 @@ public class ReplaySerializer
             ["Version"] = header.Version ?? "",
             ["StructureCount"] = (header.Structures?.Length.ToString() ?? "0") + " Structure" + ((header.Structures?.Length ?? 0) == 1 ? "" : "s"),
             ["Title"] = header.Title,
-            ["Duration"] = $"{duration.Minutes}:{duration.Seconds:D2}"
+            ["Duration"] = $"{duration.Minutes}:{duration.Seconds:D2}",
+            ["FPS"] = header.TargetFPS
         };
 
         for (int i = 0; i < (header.Players?.Length ?? 0); i++)
@@ -1022,17 +1022,26 @@ public class EventChunk
     // General Info
     public Vector3 position;
     public Quaternion rotation;
+    public string playerId;
+
+    // Player measurement
+    public float Length;
+    public float ArmSpan;
 }
 
 public enum EventType : byte
 {
+    PlayerMeasurement
 }
 
 public enum EventField
 {
     type,
     position,
-    rotation
+    rotation,
+    playerId,
+    length,
+    armspan
 }
 
 // ------------------------

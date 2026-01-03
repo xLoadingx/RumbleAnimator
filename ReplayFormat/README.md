@@ -20,16 +20,20 @@ the binary replay stream.
 
 The manifest JSON contains the following fields:
 
+- `Title` (string)
+- `CustomMap` (string)
 - `Version` (string)
 - `Scene` (string)
-- `DateUTC` (string)
+- `Date` (string)
+- `Duration` (float)
 
 - `FrameCount` (int)
-- `StructureCount` (int)
+- `PedestalCount` (int)
 - `FPS` (int)
 
 - `Players` (array)
 - `Structures` (array)
+- `Pedestals` (array)
 
 Though the game does not always record exactly at what the stated FPS is.  
 I'd recommend using the `Time` value of each chunk compared to the static FPS number.
@@ -77,6 +81,13 @@ Defined structure types:
 
 ---
 
+### Pedestals
+`Pedestals` is an array defining the pedestals in match:
+- `pos` (Vector3)
+- `active` (bool)
+
+---
+
 ## replay (binary data)
 
 The `replay` entry contains the binary replay stream, which contains all the actual data of the replay.  
@@ -101,14 +112,14 @@ The replay consists of `FrameCount` frames written sequentially.
 
 Each frame is written in the following order:
 
-1. Frame length
+1. Frame size
 2. Frame timestamp
 3. State entry count
 4. State entries
 
 ### Frame Layout
 
-    int32 FrameLength
+    int32 FrameSize
     float Time
     int32 EntryCount
     StateEntry[EntryCount]
@@ -133,8 +144,12 @@ Each state entry begins with:
     
     PlayerState
     StructureState
+    PedestalState
+    Event
 
 `Index` refers to the index in the corresponding manifest array (`Players`, `Structures`, etc.)
+
+For `Event` entries, the index is unused and can be ignored on read.
 
 ---
 
@@ -169,6 +184,9 @@ Defined structure fields:
 - `rotation` -> Quaternion (4 floats)
 - `active` -> bool
 - `grounded` -> bool
+- `isHeld` -> bool
+- `isFlicked` -> bool
+- `isShaking` -> bool
 
 ---
 
@@ -192,10 +210,19 @@ Defined player fields:
 
 ---
 
+## PedestalState Chunks
+Pedestal state chunks describe the state of the pedestals in a match.
+
+Defined pedestal fields:
+- `position` -> Vector3
+- `active` -> bool
+
+---
+
 ## State Indexing
 
 - Structure index `i` always refers to `Structures[i]` from the manifest
 - Player index `i` always refers to `Players[i]` from the manifest
-- et cetera for each state array defined in `manifest.json`
+- Pedestal index `i` always refers to `Pedestals[i]` from the manifest
 
 If a state for a given index does not appear in a frame, the state from the previous frame is reused.

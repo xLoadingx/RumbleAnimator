@@ -12,6 +12,7 @@ using Il2CppRUMBLE.Networking.MatchFlow;
 using Il2CppRUMBLE.Players;
 using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppRUMBLE.Pools;
+using Il2CppRUMBLE.Utilities;
 using Il2CppTMPro;
 using MelonLoader;
 using RumbleModdingAPI;
@@ -62,9 +63,10 @@ namespace RumbleAnimator
         
         // ------ Recording ------
         public static bool isRecording = false;
+        public bool hasSetupRecordingData = false;
         
         public static float elapsedRecordingTime = 0f;
-        private static float lastRecordedTime = 0f;
+        private static float lastRecordedFrameTime = 0f;
         
         public List<Frame> Frames = new();
         public List<EventChunk> Events = new();
@@ -87,14 +89,20 @@ namespace RumbleAnimator
         public float heldTime = 0f;
         public float soundTimer = 0f;
         
+        // Replay Buffer
+        public Queue<Frame> replayBuffer = new();
         
+        public static bool isBuffering = false;
+        
+        public static float elapsedBufferTime = 0f;
+        private static float lastBufferFrameTime = 0f;
+
+        public float lastTriggerTime = 0f;
         
         // ------ Playback ------
         
         public static float elapsedPlaybackTime = 0f;
         public static int currentPlaybackFrame = 0;
-
-        public GameObject playbackControls;
         
         // Roots
         public GameObject ReplayRoot;
@@ -112,6 +120,7 @@ namespace RumbleAnimator
         // Players
         public Clone[] PlaybackPlayers;
         public PlaybackPlayerState[] playbackPlayerStates;
+        public Clone povPlayer;
 
         // Pedestals
         public List<GameObject> replayPedestals = new();
@@ -123,10 +132,11 @@ namespace RumbleAnimator
         // UI
         public ReplayTable replayTable;
         
-        // VFX
-        public Dictionary<PooledMonoBehaviour, float> vfxPlaybackSpeed = new();
-        
-        
+        // Controls
+        public GameObject playbackControls;
+        public Material timelineMaterial;
+        public TextMeshPro totalDuration;
+        public TextMeshPro currentDuration;
         
         // ------ Settings ------
         
@@ -134,13 +144,18 @@ namespace RumbleAnimator
         
         private Mod rumbleAnimatorMod = new();
 
+        public ModSetting<int> TargetRecordingFPS = new();
+
         public ModSetting<bool> AutoRecordMatches = new();
         public ModSetting<bool> AutoRecordParks = new();
         public ModSetting<float> tableOffset = new();
 
-        public ModSetting<string> NameFormatPark = new();
-        public ModSetting<string> NameFormatGym = new();
-        public ModSetting<string> NameFormatMatch = new();
+        public ModSetting<bool> ReplayBufferEnabled = new();
+        public ModSetting<int> ReplayBufferDuration = new();
+
+        public ModSetting<string> ReplayBufferTriggerSide = new();
+
+        public ModSetting<bool> EnableHaptics = new();
         
         // ------------
         
@@ -172,6 +187,10 @@ namespace RumbleAnimator
 
             if (isPlaying)
                 StopReplay();
+
+            replayBuffer.Clear();
+            elapsedBufferTime = 0f;
+            lastBufferFrameTime = 0f;
         }
 
         public void OnMapInitialized()
@@ -201,6 +220,9 @@ namespace RumbleAnimator
                 replayTable.TableRoot.SetActive(false);
                 replayTable.metadataText.gameObject.SetActive(false);
             }
+            
+            if (currentScene != "Loader")
+                StartBuffering();
 
             var vr = PlayerManager.instance.localPlayer.Controller.transform.GetChild(2);
             replayTable.metadataText.GetComponent<LookAtPlayer>().lockX = true;
@@ -217,30 +239,32 @@ namespace RumbleAnimator
             rumbleAnimatorMod.ModVersion = BuildInfo.Version;
 
             rumbleAnimatorMod.SetFolder("MatchReplays");
+            rumbleAnimatorMod.AddDescription("Description", "", "A mod that records scenes into a 3d file that you can replay", new Tags { IsSummary = true });
+
+            TargetRecordingFPS = rumbleAnimatorMod.AddToList("Target Recording FPS", 50, "The target FPS that it tries to record at.\nThis is limited by how fast the game runs.", new Tags());
+            
             AutoRecordMatches = rumbleAnimatorMod.AddToList("Auto Record Matches", true, 0, "Automatically start recordings in matches.", new Tags());
             AutoRecordParks = rumbleAnimatorMod.AddToList("Auto Record Parks", false, 0, "Automatically start recordings when you join a park.", new Tags());
 
             tableOffset = rumbleAnimatorMod.AddToList("Table Offset", 0f, "Table offset in meters.\nThe table does move with your scale, but the default might feel too low for some people.", new Tags());
 
-            const string TagHelpText =
-                "Available tags:\n" +
-                "<size=60%>{Host}\n" +
-                "{Client} - first non-host player\n" +
-                "{LocalPlayer} - the person who recorded the replay\n" +
-                "{Player#}\n" +
-                "{Scene}\n" +
-                "{Map} - same as {Scene}\n" +
-                "{DateTime}\n" +
-                "{PlayerCount} - e.g. '1 player', '3 players'\n" +
-                "{PlayerList} - Can specify how many player names are shown\n" +
-                "{Version}\n" +
-                "{StructureCount}\n" +
-                "{Duration}\n" +
-                "\nFor parameters, you can type ':' after the tag name.\nFor example, {PlayerList:3}, {DateTime:yyyyMMdd}";
-            
-            NameFormatPark = rumbleAnimatorMod.AddToList("Auto-Name - Park", "{Host} - {Scene}\n<scale=85%>{PlayerCount}", "The automatic naming format for Park.\n\n" + TagHelpText, new Tags());
-            NameFormatGym = rumbleAnimatorMod.AddToList("Auto-Name - Gym", "{Host} - {Scene}", "The automatic naming format for Gym.\n\n" + TagHelpText, new Tags());
-            NameFormatMatch = rumbleAnimatorMod.AddToList("Auto-Name - Match", "{Host} vs {Client} - {Scene}", "The automatic naming format for matches.\n\n" + TagHelpText, new Tags());
+            ReplayBufferEnabled = rumbleAnimatorMod.AddToList("Enable Replay Buffer", false, 0, "Toggles the replay buffer.", new Tags());
+            ReplayBufferDuration = rumbleAnimatorMod.AddToList("Replay Buffer Duration", 30, "The length of the replay buffer in seconds.", new Tags());
+
+            ReplayBufferTriggerSide = rumbleAnimatorMod.AddToList("Replay Buffer Trigger Side", "Disabled",
+                "Which controller should trigger the replay buffer save when both buttons are pressed.\n" +
+                "Possible values:\n" +
+                "- Left\n" +
+                "- Right\n" +
+                "- Disabled", new Tags());
+
+            ReplayBufferEnabled.SavedValueChanged += (obj, sender) =>
+            {
+                if ((bool)ReplayBufferEnabled.SavedValue && !isBuffering)
+                    StartBuffering();
+                
+                isBuffering = (bool)ReplayBufferEnabled.SavedValue;
+            };
             
             rumbleAnimatorMod.GetFromFile();
             
@@ -439,9 +463,58 @@ namespace RumbleAnimator
             }));
             
             // Playback Controls
-            
-            playbackControls = new GameObject("Playback Controls");
 
+            playbackControls = GameObject.Instantiate(Calls.GameObjects.Gym.LOGIC.School.LogoSlab.NotificationSlab.SlabbuddyInfovariant.InfoForm.GetGameObject());
+            playbackControls.name = "Playback Controls";
+            playbackControls.transform.localScale = Vector3.one * 1.3f;
+            
+            for (int i = 0; i < playbackControls.transform.GetChild(1).childCount; i++)
+                GameObject.Destroy(playbackControls.transform.GetChild(1).GetChild(i).gameObject);
+
+            GameObject timeline = GameObject.Instantiate(Calls.GameObjects.Gym.LOGIC.Heinhouserproducts.Gearmarket.Itemhighlightwindow.StatusBar.GetGameObject(), 
+                playbackControls.transform.GetChild(1));
+            timelineMaterial = timeline.GetComponent<MeshRenderer>().material;
+            timelineMaterial.SetFloat("_Has_BP_Requirement", 1f);
+            timelineMaterial.SetFloat("_Has_RC_Requirement", 0f);
+
+            timeline.name = "Timeline";
+            timeline.transform.localPosition = new Vector3(0, -0.1091f, 0);
+            timeline.transform.localScale = new Vector3(1.0715f, 0.0434f, 1);
+            timeline.transform.localRotation = Quaternion.identity;
+            timeline.SetActive(true);
+
+            currentDuration = Calls.Create.NewText(":3", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
+            totalDuration = Calls.Create.NewText(":3", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
+            
+            currentDuration.transform.SetParent(playbackControls.transform.GetChild(1));
+            currentDuration.name = "Current Duration";
+
+            currentDuration.transform.localScale = Vector3.one * 0.8f;
+            currentDuration.transform.localPosition = new Vector3(-0.2633f, -0.1792f, 0);
+            currentDuration.transform.localRotation = Quaternion.identity;
+            
+            totalDuration.transform.SetParent(playbackControls.transform.GetChild(1));
+            totalDuration.name = "Total Duration";
+
+            totalDuration.transform.localScale = Vector3.one * 0.8f;
+            totalDuration.transform.localPosition = new Vector3(0.696f, -0.1792f, 0);
+            totalDuration.transform.localRotation = Quaternion.identity;
+            
+            GameObject exitMatchButton = GameObject.Instantiate(Calls.GameObjects.Gym.LOGIC.DressingRoom.Controlpanel.Controls.Frameattachment.Viewoptions.CyclePoseButton.GetGameObject(), 
+                playbackControls.transform.GetChild(1));
+            
+            exitMatchButton.name = "Exit Match Button";
+            exitMatchButton.transform.localScale = Vector3.one * 2f;
+            exitMatchButton.transform.localPosition = new Vector3(0, -0.633f, 0);
+            exitMatchButton.transform.localRotation = Quaternion.identity;
+            
+            exitMatchButton.transform.GetChild(1).GetComponent<TextMeshPro>().text = "Exit Replay";
+            exitMatchButton.transform.GetChild(1).GetComponent<TextMeshPro>().ForceMeshUpdate();
+            
+            InteractionButton button = exitMatchButton.transform.GetChild(0).GetComponent<InteractionButton>();
+            button.OnPressed.RemoveAllListeners();
+            button.OnPressed.AddListener((UnityAction)(() => { MelonCoroutines.Start(Utilities.LoadMap(1)); }));
+            
             GameObject.DontDestroyOnLoad(ReplayTable);
             GameObject.DontDestroyOnLoad(crystalPrefab);
             GameObject.DontDestroyOnLoad(playbackControls);
@@ -518,155 +591,179 @@ namespace RumbleAnimator
             ));
         }
 
-        public void StartRecording()
+        public void SetupRecordingData()
         {
-            Frames.Clear();
-            Structures.Clear();
+            if (hasSetupRecordingData) return;
+            hasSetupRecordingData = true;
+
             RecordedPlayers.Clear();
+            Structures.Clear();
             MasterIdToIndex.Clear();
             PlayerInfos.Clear();
             Pedestals.Clear();
             structureRenderers.Clear();
-            Events.Clear();
-
+            
             foreach (var structure in CombatManager.instance.structures)
             {
-                if (structure == null ||
-                    !structure.TryGetComponent(out Structure _) ||
-                    structure.name.StartsWith("Static Target") ||
-                    structure.name.StartsWith("Moving Target"))
+                if (structure == null || !structure.TryGetComponent(out Structure _) ||
+                    structure.name.StartsWith("Static Target") || structure.name.StartsWith("Moving Target"))
                     continue;
-                
+
                 Structures.Add(structure);
-                
-                MeshRenderer renderer = structure.GetComponentInChildren<MeshRenderer>();
-                MaterialPropertyBlock mpb = new MaterialPropertyBlock();
-                
+                var renderer = structure.GetComponentInChildren<MeshRenderer>();
+                var mpb = new MaterialPropertyBlock();
                 structureRenderers.Add((renderer, mpb));
             }
 
             foreach (var player in PlayerManager.instance.AllPlayers)
             {
-                if (player == null)
-                    continue;
-                
-                RecordedPlayers.Add(player);
-                
-                PlayerInfo info = new PlayerInfo();
+                if (player == null) continue;
 
-                info.ActorId = (byte)player.Data.GeneralData.ActorNo;
-                info.MasterId = player.Data.GeneralData.PlayFabMasterId;
-                info.Name = player.Data.GeneralData.PublicUsername;
-                info.BattlePoints = player.Data.GeneralData.BattlePoints;
-                info.VisualData = player.Data.VisualData.ToPlayfabDataString();
-                info.EquippedShiftStones = player.Data.EquipedShiftStones.ToArray();
-                info.Measurement = player.Data.PlayerMeasurement;
-                
-                info.WasHost = (info.ActorId == PhotonNetwork.MasterClient?.ActorNumber);
+                RecordedPlayers.Add(player);
+
+                var info = new PlayerInfo
+                {
+                    ActorId = (byte)player.Data.GeneralData.ActorNo,
+                    MasterId = player.Data.GeneralData.PlayFabMasterId,
+                    Name = player.Data.GeneralData.PublicUsername,
+                    BattlePoints = player.Data.GeneralData.BattlePoints,
+                    VisualData = player.Data.VisualData.ToPlayfabDataString(),
+                    EquippedShiftStones = player.Data.EquipedShiftStones.ToArray(),
+                    Measurement = player.Data.PlayerMeasurement,
+                    WasHost = (player.Data.GeneralData.ActorNo == PhotonNetwork.MasterClient?.ActorNumber)
+                };
 
                 PlayerInfos.Add(info);
             }
 
             Pedestals.AddRange(Utilities.EnumerateMatchPedestals());
-            
-            elapsedRecordingTime = 0f;
-            lastRecordedTime = 0f;
+        }
 
-            LoggerInstance.Msg("Recording started");
-            
+        public void StartRecording()
+        {
+            SetupRecordingData();
+            Frames.Clear();
+            Events.Clear();
+            elapsedRecordingTime = 0f;
+            lastRecordedFrameTime = 0f;
             isRecording = true;
+        }
+
+        public void StartBuffering()
+        {
+            SetupRecordingData();
+            replayBuffer.Clear();
+            elapsedBufferTime = 0f;
+            lastBufferFrameTime = 0f;
+            isBuffering = true;
+        }
+        
+        public void SaveReplay(Frame[] frames, string logPrefix, bool isBufferClip = false)
+        {
+            if (frames.Length == 0)
+            {
+                LoggerInstance.Warning($"{logPrefix} stopped, but no frames were captured. Replay was not saved.");
+                return;
+            }
+
+            float duration = frames[^1].Time - frames[0].Time;
+
+            var validStructures = new List<StructureInfo>();
+
+            foreach (var s in Structures)
+            {
+                if (s == null) continue;
+
+                var name = s.resourceName;
+
+                validStructures.Add(new StructureInfo
+                {
+                    Type = name switch
+                    {
+                        "RockCube" => StructureType.Cube,
+                        "Pillar" => StructureType.Pillar,
+                        "Disc" => StructureType.Disc,
+                        "Wall" => StructureType.Wall,
+                        "Ball" => StructureType.Ball,
+                        "LargeRock" => StructureType.LargeRock,
+                        "SmallRock" => StructureType.SmallRock,
+                        "BoulderBall" => StructureType.CagedBall,
+                        _ => StructureType.Cube
+                    }
+                });
+            }
+
+            string customMap = Utilities.GetActiveCustomMapName();
+            string sceneName = string.IsNullOrWhiteSpace(customMap)
+                ? Utilities.GetFriendlySceneName(currentScene)
+                : customMap;
+
+            var replayInfo = new ReplayInfo
+            {
+                Header = new ReplaySerializer.ReplayHeader
+                {
+                    Version = BuildInfo.Version,
+                    Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    Scene = currentScene,
+                    Duration = duration,
+                    CustomMap = customMap,
+                    FrameCount = frames.Length,
+                    PedestalCount = Pedestals.Count,
+                    TargetFPS = (int)TargetRecordingFPS.SavedValue,
+                    Players = PlayerInfos.ToArray(),
+                    Structures = validStructures.ToArray(),
+                },
+                Frames = frames
+            };
+            
+            string pattern = sceneName switch
+            {
+                "Gym" => ReplayFiles.LoadFormatFile("AutoNameFormats/gym"),
+                "Park" => ReplayFiles.LoadFormatFile("AutoNameFormats/park"),
+                "Pit" or "Ring" => ReplayFiles.LoadFormatFile("AutoNameFormats/match"),
+                _ => null
+            };
+
+            if (string.IsNullOrWhiteSpace(pattern))
+            {
+                LoggerInstance.Error($"{logPrefix} was not saved due to missing name format file.");
+                return;
+            }
+
+            replayInfo.Header.Title = ReplaySerializer.FormatReplayString(pattern, replayInfo.Header);
+            
+            LoggerInstance.Msg($"{logPrefix} saved after {duration:F2}s ({frames.Length} frames, avg FPS: {(frames.Length / duration):F2})");
+
+            string path = $"{ReplayFiles.replayFolder}/{(isBufferClip ? "Clip_" : "")}{Utilities.GetReplayName(replayInfo)}";
+            ReplaySerializer.BuildReplayPackage(
+                path,
+                replayInfo,
+                () =>
+                {
+                    AudioManager.instance.Play(ReplayCache.SFX["Call_PoseGhost_PosePerformed"], 
+                        PlayerManager.instance.localPlayer.Controller.GetSubsystem<PlayerVR>().transform.position);
+                    LoggerInstance.Msg($"{logPrefix} saved to disk: '{path}'");
+
+                    ReplayFiles.ReloadReplays();
+                }
+            );
         }
 
         public void StopRecording()
         {
             isRecording = false;
+            SaveReplay(Frames.ToArray(), "Recording");
+        }
 
-            try
-            {
-                if (Frames.Count == 0)
-                {
-                    LoggerInstance.Warning("Recording stopped, but no frames were captured. Replay was not saved.");
-                    return;
-                }
+        public void SaveReplayBuffer()
+        {
+            var frames = replayBuffer.ToArray();
+            float offsetTime = frames[0].Time;
 
-                var validStructures = new List<StructureInfo>();
+            foreach (var t in frames)
+                t.Time -= offsetTime;
 
-                foreach (var s in Structures)
-                {
-                    if (s == null) continue;
-
-                    var name = s.resourceName;
-
-                    validStructures.Add(new StructureInfo
-                    {
-                        Type =
-                            name switch
-                            {
-                                "RockCube" => StructureType.Cube,
-                                "Pillar" => StructureType.Pillar,
-                                "Disc" => StructureType.Disc,
-                                "Wall" => StructureType.Wall,
-                                "Ball" => StructureType.Ball,
-                                "LargeRock" => StructureType.LargeRock,
-                                "SmallRock" => StructureType.SmallRock,
-                                "BoulderBall" => StructureType.CagedBall,
-                                _ => StructureType.Cube
-                            }
-                    });
-                }
-                
-                string customMap = Utilities.GetActiveCustomMapName();
-                string sceneName = string.IsNullOrWhiteSpace(customMap)
-                    ? Utilities.GetFriendlySceneName(currentScene)
-                    : customMap;
-
-                var replayInfo = new ReplayInfo
-                {
-                    Header = new ReplaySerializer.ReplayHeader
-                    {
-                        Version = BuildInfo.Version,
-                        DateUTC = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                        Scene = currentScene,
-                        CustomMap = customMap,
-                        FrameCount = Frames.Count,
-                        PedestalCount = Pedestals.Count,
-                        Players = PlayerInfos.ToArray(),
-                        Structures = validStructures.ToArray(),
-                    },
-                    Frames = Frames.ToArray()
-                };
-                
-                string pattern = sceneName switch
-                {
-                    "Gym" => (string)NameFormatGym.SavedValue,
-                    "Park" => (string)NameFormatPark.SavedValue,
-                    "Pit" or "Ring" => (string)NameFormatMatch.SavedValue,
-                    _ => "{Scene} - {DateTime}"
-                };
-
-                replayInfo.Header.Title = ReplaySerializer.FormatReplayString(pattern, replayInfo.Header);
-
-                LoggerInstance.Msg($"Recording stopped after {elapsedRecordingTime:F2}s ({Frames.Count} frames)");
-
-                string path = $"{ReplayFiles.replayFolder}/{Utilities.GetReplayName(replayInfo)}";
-                ReplaySerializer.BuildReplayPackage(
-                    path,
-                    replayInfo,
-                    done: () =>
-                    {
-                        AudioManager.instance.Play(ReplayCache.SFX["Call_PoseGhost_PosePerformed"], PlayerManager.instance.localPlayer.Controller.GetSubsystem<PlayerVR>().transform.position);
-                        LoggerInstance.Msg($"Replay saved to disk: '{path}'");
-
-                        if (currentScene == "Gym")
-                            ReplayFiles.ReloadReplays();
-                    }
-                );
-            }
-            catch (Exception e)
-            {
-                LoggerInstance.Error("Failed to save replay:");
-                LoggerInstance.Error(e);
-            }
+            SaveReplay(frames, "Replay Buffer", true);
         }
 
         public void LoadSelectedReplay()
@@ -717,7 +814,6 @@ namespace RumbleAnimator
                             else if (ReplayFiles.currentHeader.Scene == "Map1")
                                 Calls.GameObjects.Map1.Map1production.GetGameObject().SetActive(false);
                         }
-                            
                     }));
                 }
                 else if (ReplayFiles.currentHeader.Scene != "Park")
@@ -840,6 +936,8 @@ namespace RumbleAnimator
                 
                 playbackPlayerStates = new PlaybackPlayerState[PlaybackPlayers.Length];
                 
+                ReorderPlayers();
+                
                 isPlaying = true;
             }));
 
@@ -863,11 +961,56 @@ namespace RumbleAnimator
                     foreach (var player in PlaybackPlayers)
                         player.Controller.GetSubsystem<PlayerNameTag>().FadePlayerNameTag(false);
                     
-                    MatchHandler.instance.FadeInCombatMusic();
+                    // MatchHandler.instance.FadeInCombatMusic();
                 }
             }
+            
+            // Playback Controls
+            timelineMaterial.SetFloat("_BP_Target", currentReplay.Header.Duration * 1000f);
+            timelineMaterial.SetFloat("_BP_Current", 0f);
+
+            TimeSpan t = TimeSpan.FromSeconds(currentReplay.Header.Duration);
+            totalDuration.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
+            currentDuration.text = "0:00";
         }
 
+        public void ReorderPlayers()
+        {
+            var all = PlayerManager.instance.AllPlayers;
+            if (all == null || all.Count == 0)
+                return;
+
+            var wasHostById = new Dictionary<string, bool>();
+            foreach (var p in currentReplay.Header.Players)
+                wasHostById[p.MasterId] = p.WasHost;
+
+            Player host = null;
+            Player local = PlayerManager.instance.localPlayer;
+            var middle = new List<Player>();
+
+            foreach (var p in all)
+            {
+                if (p == local)
+                    continue;
+
+                if (wasHostById.TryGetValue(p.Data.GeneralData.PlayFabMasterId, out bool wasHost) && wasHost)
+                    host = p;
+                else
+                    middle.Add(p);
+            }
+
+            all.Clear();
+
+            if (host != null)
+                all.Add(host);
+
+            foreach (var p in middle)
+                all.Add(p);
+
+            if (local != null)
+                all.Add(local);
+        }
+        
         private IEnumerator SpawnClones(Action done = null)
         {
             PlaybackPlayers = new Clone[currentReplay.Header.Players.Length];
@@ -1022,12 +1165,13 @@ namespace RumbleAnimator
 
             CombatManager.instance?.CleanStructureList();
 
+            UpdateReplayCameraPOV(-1);
+
             PlaybackPlayers = null;
             PlaybackStructures = null;
             replayStructures = null;
             replayPlayers = null;
             pedestalsParent = null;
-            vfxPlaybackSpeed.Clear();
 
             elapsedPlaybackTime = 0f;
             currentPlaybackFrame = 0;
@@ -1045,6 +1189,38 @@ namespace RumbleAnimator
         {
             HandleRecording();
             HandlePlayback();
+        }
+        
+
+        public override void OnFixedUpdate()
+        {
+            if (currentScene == "Loader") return;
+            
+            string triggerSetting = (string)ReplayBufferTriggerSide.SavedValue;
+            bool hapticsEnabled = (bool)EnableHaptics.SavedValue;
+            
+            if (triggerSetting.Equals("Left", StringComparison.OrdinalIgnoreCase) &&
+                Calls.ControllerMap.LeftController.GetPrimary() > 0 &&
+                Calls.ControllerMap.LeftController.GetSecondary() > 0 &&
+                Time.time - lastTriggerTime > 1f)
+            {
+                lastTriggerTime = Time.time;
+                SaveReplayBuffer();
+
+                if (hapticsEnabled)
+                    PlayerManager.instance.localPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(0.6f, 0.15f, 0f, 0f);
+            }
+            else if (triggerSetting.Equals("Right", StringComparison.OrdinalIgnoreCase) &&
+                 Calls.ControllerMap.RightController.GetPrimary() > 0 &&
+                 Calls.ControllerMap.RightController.GetSecondary() > 0 &&
+                 Time.time - lastTriggerTime > 1f)
+            {
+                lastTriggerTime = Time.time;
+                SaveReplayBuffer();
+
+                if (hapticsEnabled)
+                    PlayerManager.instance.localPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(0f, 0f, 0.6f, 0.15f);
+            }
         }
 
         public void HandleReplayPose()
@@ -1150,28 +1326,55 @@ namespace RumbleAnimator
         
         public void HandleRecording()
         {
-            if (!isRecording) return;
+            if (!isRecording && !isBuffering) return;
             
-            elapsedRecordingTime += Time.deltaTime;
+            if (isRecording)
+                elapsedRecordingTime += Time.deltaTime;
             
-            if (elapsedRecordingTime - lastRecordedTime < (1f / 50f))
-                return;
+            if (isBuffering)
+                elapsedBufferTime += Time.deltaTime;
 
-            lastRecordedTime = elapsedRecordingTime;
+            var frame = CaptureFrame();
             
-            // Players
+            // Recording
+            if (isRecording && (elapsedRecordingTime - lastRecordedFrameTime >= 1f / (int)TargetRecordingFPS.SavedValue))
+            {
+                lastRecordedFrameTime = elapsedRecordingTime;
 
+                frame.Time = elapsedRecordingTime;
+                Frames.Add(frame);
+            }
+
+            // Buffering
+            if (isBuffering && (elapsedBufferTime - lastBufferFrameTime >= 1f / (int)TargetRecordingFPS.SavedValue))
+            {
+                lastBufferFrameTime = elapsedBufferTime;
+
+                frame.Time = elapsedBufferTime;
+                replayBuffer.Enqueue(frame);
+
+                float cutoffTime = frame.Time - (int)ReplayBufferDuration.SavedValue;
+
+                while (replayBuffer.Count > 0 && replayBuffer.Peek().Time < cutoffTime)
+                    replayBuffer.Dequeue();
+            }
+
+            Patches.activations.Clear();
+            Events.Clear();
+        }
+
+        Frame CaptureFrame()
+        {
             var heldStructures = new HashSet<GameObject>();
             var flickedStructures = new HashSet<GameObject>();
-            
+
+            // Players
             var playerStates = Utilities.NewArray<PlayerState>(RecordedPlayers.Count);
 
             for (int i = 0; i < RecordedPlayers.Count; i++)
             {
                 var p = RecordedPlayers[i];
-
-                if (p == null)
-                    continue;
+                if (p == null) continue;
 
                 var stackProc = p.Controller.GetSubsystem<PlayerStackProcessor>();
 
@@ -1182,77 +1385,60 @@ namespace RumbleAnimator
                 {
                     switch (stack.cachedName)
                     {
-                        case "Flick":
-                            flickStack = stack;
-                            break;
-
+                        case "Flick": flickStack = stack; break;
                         case "HoldLeft":
-                        case "HoldRight":
-                            holdStack = stack;
-                            break;
+                        case "HoldRight": holdStack = stack; break;
                     }
 
-                    if (flickStack != null && holdStack != null)
-                        break;
-                }
-
-                if (flickStack != null && flickStack.runningExecutions != null)
-                {
-                    foreach (var exec in flickStack.runningExecutions)
+                    if (flickStack?.runningExecutions != null)
                     {
-                        var proc = exec.TargetProcessable.TryCast<ProcessableComponent>();
-                        if (proc == null)
-                            continue;
-
-                        var go = proc.gameObject;
-                        if (go != null)
-                            flickedStructures.Add(go);
+                        foreach (var exec in flickStack.runningExecutions)
+                        {
+                            var proc = exec.TargetProcessable.TryCast<ProcessableComponent>();
+                            if (proc?.gameObject != null)
+                                flickedStructures.Add(proc.gameObject);
+                        }
                     }
-                }
-                
-                if (holdStack != null && holdStack.runningExecutions != null)
-                {
-                    foreach (var exec in holdStack.runningExecutions)
+                    
+                    if (holdStack?.runningExecutions != null)
                     {
-                        var proc = exec.TargetProcessable.TryCast<ProcessableComponent>();
-                        if (proc == null)
-                            continue;
-
-                        var go = proc.gameObject;
-                        if (go != null)
-                            heldStructures.Add(go);
+                        foreach (var exec in holdStack.runningExecutions)
+                        {
+                            var proc = exec.TargetProcessable.TryCast<ProcessableComponent>();
+                            if (proc?.gameObject != null)
+                                heldStructures.Add(proc.gameObject);
+                        }
                     }
+                    
+                    Transform VRRig = p.Controller.transform.GetChild(2);
+                    Transform LHand = VRRig.GetChild(1);
+                    Transform RHand = VRRig.GetChild(2);
+                    Transform Head = VRRig.GetChild(0).GetChild(0);
+
+                    playerStates[i] = new PlayerState
+                    {
+                        VRRigPos = VRRig.position,
+                        VRRigRot = VRRig.rotation,
+                        HeadPos = Head.localPosition,
+                        HeadRot = Head.localRotation,
+                        LHandPos = LHand.localPosition,
+                        LHandRot = LHand.localRotation,
+                        RHandPos = RHand.localPosition,
+                        RHandRot = RHand.localRotation,
+                        Health = p.Data.HealthPoints,
+                        currentStack = Patches.activations.FirstOrDefault(s => s.playerId == p.Data.GeneralData.PlayFabMasterId).stackId,
+                        active = true
+                    };
                 }
-
-                Transform VRRig = p.Controller.transform.GetChild(2);
-                Transform LHand = VRRig.transform.GetChild(1);
-                Transform RHand = VRRig.transform.GetChild(2);
-                Transform Head = VRRig.transform.GetChild(0).GetChild(0);
-
-                playerStates[i] = new PlayerState
-                {
-                    VRRigPos = VRRig.position,
-                    VRRigRot = VRRig.rotation,
-                    HeadPos = Head.localPosition,
-                    HeadRot = Head.localRotation,
-                    LHandPos = LHand.localPosition,
-                    LHandRot = LHand.localRotation,
-                    RHandPos = RHand.localPosition,
-                    RHandRot = RHand.localRotation,
-                    Health = p.Data.HealthPoints,
-                    currentStack = Patches.activations.FirstOrDefault(s => s.playerId == p.Data.GeneralData.PlayFabMasterId).stackId,
-                    active = true
-                };
             }
-            
+
             // Structures
-            
             var structureStates = Utilities.NewArray<StructureState>(Structures.Count);
             
             for (int i = 0; i < Structures.Count; i++)
             {
                 var structure = Structures[i];
-                
+
                 if (structure == null ||
                     !structure.TryGetComponent(out Structure _) ||
                     structure.name.StartsWith("Static Target") ||
@@ -1266,30 +1452,26 @@ namespace RumbleAnimator
                 structureRenderer.renderer.GetPropertyBlock(structureRenderer.mpb);
 
                 bool isShaking = structureRenderer.mpb.GetFloat("_shake") > 0f;
-                
+
                 structureStates[i] = new StructureState
                 {
                     position = structure.transform.position,
                     rotation = structure.transform.rotation,
                     active = structure.gameObject.activeSelf,
                     grounded = structure.IsGrounded,
-                    
                     isHeld = heldStructures.Contains(structure.gameObject),
                     isFlicked = flickedStructures.Contains(structure.gameObject),
                     isShaking = isShaking
                 };
             }
-            
+
             // Pedestals
-            
             var pedestalStates = Utilities.NewArray<PedestalState>(Pedestals.Count);
-            
+
             for (int i = 0; i < Pedestals.Count; i++)
             {
                 var pedestal = Pedestals[i];
-
-                if (pedestal == null)
-                    continue;
+                if (pedestal == null) continue;
                 
                 pedestalStates[i] = new PedestalState
                 {
@@ -1297,22 +1479,17 @@ namespace RumbleAnimator
                     active = pedestal.GetComponent<Pedestal>().enabled
                 };
             }
-
-            var frame = new Frame
+            
+            return new Frame
             {
-                Time = elapsedRecordingTime, 
                 Structures = structureStates,
                 Players = playerStates,
                 Pedestals = pedestalStates,
                 Events = Events.ToArray()
             };
-            Frames.Add(frame);
-
-            Patches.activations.Clear();
-            Events.Clear();
         }
 
-        void SetPlaybackSpeed(float newSpeed)
+        public void SetPlaybackSpeed(float newSpeed)
         {
             playbackSpeed = newSpeed;
 
@@ -1327,26 +1504,49 @@ namespace RumbleAnimator
                 var vfx = VFXParent.transform.GetChild(i);
                 vfx.GetComponent<VisualEffect>().playRate = newSpeed;
             }
+
+            foreach (var pedestal in Pedestals)
+            {
+                foreach (var vfx in pedestal.GetComponentsInChildren<VisualEffect>())
+                    vfx.playRate = newSpeed;
+            }
         }
         
         public void HandlePlayback()
         {
             if (!isPlaying) return;
 
-            if (currentPlaybackFrame >= currentReplay.Frames.Length - 2)
+            if (currentPlaybackFrame >= currentReplay.Frames.Length - 3)
             {
                 StopReplay();
                 return;
             }
-            
-            elapsedPlaybackTime += Time.deltaTime * playbackSpeed;
 
-            while (currentPlaybackFrame < currentReplay.Frames.Length - 2 &&
-                   currentReplay.Frames[currentPlaybackFrame + 1].Time <= elapsedPlaybackTime)
+            elapsedPlaybackTime += Time.deltaTime * playbackSpeed;
+            SetPlaybackTime(elapsedPlaybackTime);
+
+            timelineMaterial?.SetFloat("_BP_Current", elapsedPlaybackTime * 1000f);
+
+            if (currentDuration != null)
             {
-                currentPlaybackFrame++;
+                TimeSpan t = TimeSpan.FromSeconds(elapsedPlaybackTime);
+                currentDuration.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
             }
-            
+        }
+
+        public void SetPlaybackTime(float time)
+        {
+            elapsedPlaybackTime = Clamp(time, 0f, currentReplay.Frames[^1].Time);
+
+            for (int i = 0; i < currentReplay.Frames.Length - 2; i++)
+            {
+                if (currentReplay.Frames[i + 1].Time > elapsedPlaybackTime)
+                {
+                    currentPlaybackFrame = i;
+                    break;
+                }
+            }
+
             Frame a = currentReplay.Frames[currentPlaybackFrame];
             Frame b = currentReplay.Frames[currentPlaybackFrame + 1];
 
@@ -1354,8 +1554,51 @@ namespace RumbleAnimator
             float t = span > 0f
                 ? (elapsedPlaybackTime - a.Time) / span
                 : 1f;
-            
+
             ApplyInterpolatedFrame(currentPlaybackFrame, Clamp01(t));
+        }
+
+        public void SetPlaybackFrame(int frame)
+        {
+            int clampedFrame = Clamp(frame, 0, currentReplay.Frames.Length - 2);
+            float time = currentReplay.Frames[clampedFrame].Time;
+            SetPlaybackTime(time);
+        }
+
+        public void UpdateReplayCameraPOV(int playerIndex, bool hideLocalPlayer = false)
+        {
+            RecordingCamera cam = Calls.GameObjects.DDOL.GameInstance.Initializable.RecordingCamera.GetGameObject().GetComponent<RecordingCamera>(); 
+            
+            var localController = PlayerManager.instance.localPlayer.Controller.transform;
+            localController.GetChild(1).gameObject.SetActive(!hideLocalPlayer);
+            localController.GetChild(6).gameObject.SetActive(!hideLocalPlayer);
+            
+            var povHead = povPlayer?.Controller.GetSubsystem<PlayerIK>().VrIK.references.head;
+            if (povHead != null)
+            {
+                if (povPlayer != null)
+                {
+                    povHead.transform.localScale = Vector3.one;
+                    povPlayer.Controller.transform.GetChild(6).gameObject.SetActive(true);
+                }
+                
+                if (playerIndex < 0 || playerIndex >= PlaybackPlayers.Length)
+                {
+                    cam.localPlayerVR = Calls.Players.GetLocalPlayer().Controller.GetSubsystem<PlayerVR>();
+                    povHead.transform.localScale = Vector3.one;
+                    return;
+                }
+            }
+
+            if (playerIndex > -1)
+            {
+                povPlayer = PlaybackPlayers[playerIndex];
+                povHead = povPlayer.Controller.GetSubsystem<PlayerIK>().VrIK.references.head;
+                povHead.transform.localScale = Vector3.zero;
+                povPlayer.Controller.transform.GetChild(6).gameObject.SetActive(false);
+                
+                cam.localPlayerVR = povPlayer.Controller.GetSubsystem<PlayerVR>();
+            }
         }
 
         public void ApplyInterpolatedFrame(int frameIndex, float t)
@@ -1410,7 +1653,6 @@ namespace RumbleAnimator
                     effect.transform.position = sa.position;
                     effect.transform.rotation = Quaternion.identity;
                     effect.gameObject.AddComponent<ReplayTag>();
-                    vfxPlaybackSpeed.Add(effect, effect.returnToPoolTime);
                     
                     AudioManager.instance.Play(
                         playbackStructure.GetComponent<Structure>().onDeathAudio, 
@@ -1425,14 +1667,13 @@ namespace RumbleAnimator
                 {
                     var pool = poolManager.GetPool("DustSpawn_VFX");
 
-                    var offset = playbackStructure.name is "Ball" or "Disc" ? Vector3.zero : new Vector3(0, 0.5f, 0);
+                    var offset = playbackStructure.name == "Disc" ? Vector3.zero : new Vector3(0, 0.5f, 0);
 
                     PooledMonoBehaviour effect = GameObject.Instantiate(pool.poolItem, VFXParent.transform);
                     effect.transform.position = sb.position + offset;
                     effect.transform.rotation = Quaternion.identity;
                     effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
                     effect.gameObject.AddComponent<ReplayTag>();
-                    vfxPlaybackSpeed.Add(effect, effect.returnToPoolTime);
 
                     string sfx = playbackStructure.name switch
                     {
@@ -1473,22 +1714,27 @@ namespace RumbleAnimator
                             : structureComp.freeState
                     );
 
-                    var offset = playbackStructure.name switch
+                    if (sb.grounded)
                     {
-                        "RockCube" => 0.5f,
-                        "Wall" => 1f,
-                        "Pillar" => 1f,
-                        "LargeRock" => 0.7f,
-                        _ => 0f
-                    };
-                    
-                    var pool = poolManager.GetPool(sb.grounded ? "Ground_VFX" : "Unground_VFX");
-                    var effect = GameObject.Instantiate(pool.poolItem.gameObject, VFXParent.transform);
-                    effect.transform.localPosition = sb.position - new Vector3(0f, offset, 0f);
-                    effect.transform.localRotation = Quaternion.identity;
-                    effect.transform.localScale = Vector3.one;
-                    effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
-                    effect.AddComponent<ReplayTag>();
+                        var collider = structureComp.GetComponentInChildren<Collider>();
+
+                        Vector3 origin = collider.bounds.center;
+
+                        if (Physics.Raycast(origin, Vector3.down, out var hit, 5f, 768))
+                        {
+                            var pool = poolManager.GetPool("Ground_VFX");
+                            var effect = GameObject.Instantiate(pool.poolItem.gameObject, VFXParent.transform);
+                            
+                            effect.transform.SetPositionAndRotation(
+                                hit.point,
+                                Quaternion.identity
+                            );
+                            
+                            effect.transform.localScale = Vector3.one;
+                            effect.GetComponent<VisualEffect>().playRate = playbackSpeed;
+                            effect.AddComponent<ReplayTag>();
+                        }
+                    }
                 }
                 
                 state.grounded = structureComp.IsGrounded;

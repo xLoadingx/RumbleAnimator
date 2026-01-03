@@ -199,7 +199,7 @@ public class ReplayGlobals
         public static IEnumerator LoadMap(int index, float fadeDuration = 2f, Action onLoaded = null)
         {
             foreach (var structure in CombatManager.instance.structures.ToArray())
-                structure.Kill(Vector3.zero, false, false);
+                structure?.Kill(Vector3.zero, false, false);
             
             SceneManager.instance.LoadSceneAsync(index, false, false, fadeDuration);
 
@@ -285,41 +285,76 @@ public class ReplayGlobals
             });
             
             StartWatchingReplays();
-            EnsureDefaultMetadataFormats();
+            EnsureDefaultFormats();
         }
 
-        public static void EnsureDefaultMetadataFormats()
+        public static void EnsureDefaultFormats()
         {
-            void WriteIfNotExists(string fileName, string contents)
+            void WriteIfNotExists(string filePath, string contents)
             {
-                string path = Path.Combine(replayFolder, "MetadataFormats", fileName);
+                string path = Path.Combine(replayFolder, filePath);
                 if (!File.Exists(path))
                     File.WriteAllText(path, contents);
             }
 
-            string folder = Path.Combine(replayFolder, "MetadataFormats");
-            Directory.CreateDirectory(folder);
+            string metadataFormatsFolder = Path.Combine(replayFolder, "MetadataFormats");
+            Directory.CreateDirectory(metadataFormatsFolder);
             
-            WriteIfNotExists("metadata_gym.txt", "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\nDuration: {Duration}\n\n{StructureCount}");
-            WriteIfNotExists("metadata_park.txt", "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\nHost: {Host}\n{PlayerList:3}\nDuration: {Duration}\n\n{StructureCount}");
-            WriteIfNotExists("metadata_match.txt", "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\nHost: {Host}\nDuration: {Duration}\n\n{StructureCount}");
+            string autoNameFormatsFolder = Path.Combine(replayFolder, "AutoNameFormats");
+            Directory.CreateDirectory(autoNameFormatsFolder);
+            
+            const string TagHelpText =
+                "Available tags:\n" +
+                "{Host}\n" +
+                "{Client} - first non-host player\n" +
+                "{LocalPlayer} - the person who recorded the replay\n" +
+                "{Player#}\n" +
+                "{Scene}\n" +
+                "{Map} - same as {Scene}\n" +
+                "{DateTime}\n" +
+                "{PlayerCount} - e.g. '1 player', '3 players'\n" +
+                "{PlayerList} - Can specify how many player names are shown\n" +
+                "{Version}\n" +
+                "{StructureCount}\n" +
+                "{Duration}\n" +
+                "{FPS} - Target FPS of the recording\n" +
+                "\n" +
+                "You can pass parameters to tags using ':'.\n" +
+                "Example: {PlayerList:3}, {DateTime:yyyyMMdd}\n\n" +
+                "###\n";
+            
+            WriteIfNotExists("MetadataFormats/metadata_gym.txt", TagHelpText + "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\nDuration: {Duration}\n\n{StructureCount}");
+            WriteIfNotExists("MetadataFormats/metadata_park.txt", TagHelpText + "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\nHost: {Host}\n{PlayerList:3}\nDuration: {Duration}\n\n{StructureCount}");
+            WriteIfNotExists("MetadataFormats/metadata_match.txt", TagHelpText + "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\nHost: {Host}\nDuration: {Duration}\n\n{StructureCount}");
+            
+            WriteIfNotExists("AutoNameFormats/gym.txt", TagHelpText + "{LocalPlayer} - {Scene}");
+            WriteIfNotExists("AutoNameFormats/park.txt", TagHelpText + "{Host} - {Scene}\n<scale=85%>{PlayerCount}</scale>");
+            WriteIfNotExists("AutoNameFormats/match.txt", TagHelpText + "{Host} vs {Client} - {Scene}");
         }
 
-        public static string GetExternalFormatOrDefault(string fileName)
+        public static string LoadFormatFile(string path)
         {
-            string path = Path.Combine(replayFolder, "MetadataFormats", fileName);
-            return File.ReadAllText(path);
+            string fullPath = Path.Combine(replayFolder, path + ".txt");
+            if (!File.Exists(fullPath)) return null;
+            
+            var lines = File.ReadAllLines(fullPath);
+            int startIndex = Array.FindIndex(lines, line => line.Trim() == "###");
+            if (startIndex == -1 || startIndex + 1 >= lines.Length) 
+                return null;
+
+            var formatLines = lines.Skip(startIndex + 1);
+            return string.Join("\n", formatLines);
         }
 
         public static string GetMetadataFormat(string scene)
         {
             return scene switch
             {
-                "Gym" => GetExternalFormatOrDefault("metadata_gym.txt"),
+                "Gym" => LoadFormatFile("MetadataFormats/metadata_gym"),
 
-                "Park" => GetExternalFormatOrDefault("metadata_park.txt"),
+                "Park" => LoadFormatFile("MetadataFormats/metadata_park"),
 
-                "Map0" or "Map1" => GetExternalFormatOrDefault("metadata_match.txt"),
+                "Map0" or "Map1" => LoadFormatFile("MetadataFormats/metadata_match"),
 
                 _ => "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\nDuration: {Duration}\n\n{StructureCount}"
             };
@@ -339,10 +374,10 @@ public class ReplayGlobals
 
                 string pattern = scene switch
                 {
-                    "Gym" => (string)Main.instance.NameFormatGym.SavedValue,
-                    "Park" => (string)Main.instance.NameFormatPark.SavedValue,
-                    "Map0" or "Map1" => (string)Main.instance.NameFormatMatch.SavedValue,
-                    _ => "{Scene} - {DateTime}"
+                    "Gym" => LoadFormatFile("AutoNameFormats/gym"),
+                    "Park" => LoadFormatFile("AutoNameFormats/park"),
+                    "Map0" or "Map1" => LoadFormatFile("AutoNameFormats/match"),
+                    _ => null
                 };
 
                 header.Title = ReplaySerializer.FormatReplayString(pattern, header);
@@ -458,12 +493,6 @@ public class ReplayGlobals
             return
                 $"{count} player{(count == 1 ? "" : "s")}\n" +
                 $"{line}\n";
-        }
-
-        public static TimeSpan GetDuration(ReplaySerializer.ReplayHeader header)
-        {
-            double seconds = (double)header.FrameCount / 50;
-            return TimeSpan.FromSeconds(seconds);
         }
         
         public static void SelectReplay(int index)
@@ -726,7 +755,7 @@ public class ReplayGlobals
             
             Crystal crystal = GameObject.Instantiate(crystalPrefab, crystalParent.transform).AddComponent<Crystal>();
                 
-            crystal.name = $"Crystal ({header.Title}, {header.DateUTC})";
+            crystal.name = $"Crystal ({header.Title}, {header.Date})";
             crystal.transform.position = position;
             crystal.Title = header.Title;
 

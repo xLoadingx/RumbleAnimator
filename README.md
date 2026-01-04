@@ -16,6 +16,10 @@ It is primarily intended for:
 ![HandGesture](CustomGesture.png)
 - You can also do this same hand gesture again to stop and save the recording.
 
+### Playback
+While a replay is playing, you can do the above hand gesture **but** with both triggers held down
+This brings up a control menu.
+
 ### Replay Buffer
 If the Replay Buffer is enabled
 - The mod continuously stores the last N seconds of gameplay (you can configure the duration).

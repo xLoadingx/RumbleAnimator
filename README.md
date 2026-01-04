@@ -21,6 +21,9 @@ If the Replay Buffer is enabled
 - The mod continuously stores the last N seconds of gameplay (you can configure the duration).
 - To save the buffer, press both buttons on the controller side you've chosen
 
+When a replay is finished saving, you'll hear a little pop sound.  
+If you have haptics enabled, you'll also feel a small vibration in your controller.
+
 ### The Replay Table
 You will find the Replay Table near the region selector in Gym. You can press the left and right arrow buttons to scroll through your stored replays.  
 Holding the button below the name of the replay will load you into the replay in it's specific map.

@@ -90,6 +90,9 @@ public class ReplayGlobals
     {
         private static GameObject customMultiplayerMaps;
         
+        
+        // ----- Names -----
+        
         public static string GetFriendlySceneName(string scene)
         {
             return scene switch
@@ -99,6 +102,7 @@ public class ReplayGlobals
                 _ => scene
             };
         }
+        
 
         public static string GetActiveCustomMapName()
         {
@@ -116,6 +120,28 @@ public class ReplayGlobals
 
             return null;
         }
+
+        public static GameObject GetCustomMap(string mapName)
+        {
+            customMultiplayerMaps ??= GameObject.Find("CustomMultiplayerMaps");
+
+            if (customMultiplayerMaps == null)
+            {
+                Main.instance.ReplayError("Selected replay uses a custom map, but custom maps are not installed.");
+                return null;
+            }
+
+            GameObject map = customMultiplayerMaps.transform.Find(mapName)?.gameObject;
+
+            if (map == null)
+            {
+                Main.instance.ReplayError($"Could not find the custom map '{mapName}.");
+                return null;
+            }
+
+            return map;
+        }
+        
 
         public static string CleanName(string name)
         {
@@ -140,7 +166,10 @@ public class ReplayGlobals
 
             return string.IsNullOrEmpty(s) ? "Unknown" : s;
         }
+        
 
+        // ----- Replay Helpers -----
+        
         public static string GetReplayName(ReplayInfo replayInfo)
         {
             string sceneName = GetFriendlySceneName(replayInfo.Header.Scene);
@@ -168,17 +197,7 @@ public class ReplayGlobals
                 _ => $"Replay_{timestamp}_{sceneName}_{localPlayerName}.replay"
             };
         }
-
-        public static T[] NewArray<T>(int count, T[] copyFrom = null) where T : new()
-        {
-            var arr = new T[count];
-            for (int i = 0; i < count; i++)
-                arr[i] = copyFrom != null && i < copyFrom.Length
-                    ? copyFrom[i]
-                    : new T();
-            return arr;
-        }
-
+        
         public static bool IsReplayClone(PlayerController controller)
         {
             if (controller == null || Main.instance.PlaybackPlayers == null)
@@ -190,11 +209,12 @@ public class ReplayGlobals
 
             return false;
         }
-
+        
         public static IEnumerable<GameObject> EnumerateMatchPedestals()
         {
             return GameObject.FindObjectsOfType<Pedestal>(true).Select(p => p.gameObject);
         }
+        
 
         public static IEnumerator LoadMap(int index, float fadeDuration = 2f, Action onLoaded = null)
         {
@@ -206,21 +226,35 @@ public class ReplayGlobals
             while (SceneManager.instance.IsLoadingScene)
                 yield return null;
 
-            yield return new WaitForSeconds(0.1f);
-            MelonLogger.Msg("Loaded");
+            yield return new WaitForSeconds(0.01f);
             onLoaded?.Invoke();
         }
-
-        public static Color32 RandomColor()
+        
+        public static bool HasVFXType(string type, Transform obj)
         {
-            float h = Random.value;
-            float s = Random.Range(0.6f, 0.9f);
-            float v = Random.Range(0.7f, 1.0f);
-            
-            Color c = Color.HSVToRGB(h, s, v);
-            return c;
+            var tags = obj.GetComponentsInChildren<ReplayTag>();
+            foreach (var t in tags)
+            {
+                if (t.Type == type)
+                    return true;
+            }
+            return false;
+        }
+        
+        public static Vector3 GetPositionOverMesh(float a, float b, MeshRenderer renderer)
+        {
+            float u = Clamp01(a / b);
+
+            Bounds bound = renderer.bounds;
+
+            Vector3 pos = renderer.transform.position;
+            pos.x = Lerp(bound.max.x, bound.min.x, u);
+
+            return pos;
         }
 
+        // ----- Lerping -----
+        
         public static float EaseInOut(float t)
         {
             return t < 0.5f ? 2 * t * t : 1 - Pow(-2 * t + 2, 2) / 2;
@@ -234,7 +268,8 @@ public class ReplayGlobals
             float duration,
             Func<float, float> easing = null,
             Action done = null,
-            float delay = 0f
+            float delay = 0f,
+            Func<bool> isValid = null
         )
         {
             yield return new WaitForSeconds(delay);
@@ -244,7 +279,11 @@ public class ReplayGlobals
 
             while (t < 1f)
             {
+                if (isValid != null && !isValid())
+                    yield break;
+                
                 t += Time.deltaTime / duration;
+                
                 float easedT = easing?.Invoke(Clamp01(t)) ?? t;
                 setter(lerpFunc(startValue, targetValue, easedT));
                 yield return null;
@@ -252,6 +291,29 @@ public class ReplayGlobals
 
             setter(targetValue);
             done?.Invoke();
+        }
+        
+        
+        // ----- Other -----
+        
+        public static Color32 RandomColor()
+        {
+            float h = Random.value;
+            float s = Random.Range(0.6f, 0.9f);
+            float v = Random.Range(0.7f, 1.0f);
+            
+            Color c = Color.HSVToRGB(h, s, v);
+            return c;
+        }
+        
+        public static T[] NewArray<T>(int count, T[] copyFrom = null) where T : new()
+        {
+            var arr = new T[count];
+            for (int i = 0; i < count; i++)
+                arr[i] = copyFrom != null && i < copyFrom.Length
+                    ? copyFrom[i]
+                    : new T();
+            return arr;
         }
     }
 
@@ -274,6 +336,9 @@ public class ReplayGlobals
 
         private static Dictionary<string, ReplaySerializer.ReplayHeader> manifestCache = new();
 
+        
+        // ----- Init -----
+        
         public static void Init()
         {
             Directory.CreateDirectory(replayFolder);
@@ -331,6 +396,9 @@ public class ReplayGlobals
             WriteIfNotExists("AutoNameFormats/park.txt", TagHelpText + "{Host} - {Scene}\n");
             WriteIfNotExists("AutoNameFormats/match.txt", TagHelpText + "{Host} vs {Client} - {Scene}");
         }
+        
+        
+        // ----- Format Files -----
 
         public static string LoadFormatFile(string path)
         {
@@ -359,6 +427,7 @@ public class ReplayGlobals
                 _ => "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\nDuration: {Duration}\n\n{StructureCount}"
             };
         }
+        
 
         public static ReplaySerializer.ReplayHeader GetCachedManifest(string path)
         {
@@ -385,7 +454,10 @@ public class ReplayGlobals
             
             return header;
         }
+        
 
+        // ----- Metadata -----
+        
         static void StartWatchingReplays()
         {
             replayWatcher = new FileSystemWatcher(replayFolder, "*.replay");
@@ -417,6 +489,7 @@ public class ReplayGlobals
             reloadQueued = true;
             MelonCoroutines.Start(ReloadNextFrame());
         }
+        
 
         public static void HideMetadata()
         {
@@ -472,6 +545,7 @@ public class ReplayGlobals
             
             metadataHidden = false;
         }
+        
 
         public static string BuildPlayerLine(PlayerInfo[] players, int maxNames)
         {
@@ -494,6 +568,9 @@ public class ReplayGlobals
                 $"{count} player{(count == 1 ? "" : "s")}\n" +
                 $"{line}\n";
         }
+        
+        
+        // ----- Replay Selection -----
         
         public static void SelectReplay(int index)
         {
@@ -527,8 +604,10 @@ public class ReplayGlobals
                     table.metadataText.text = ReplaySerializer.FormatReplayString(format, header);
                     ShowMetadata();
                 }
-                catch
+                catch (Exception e)
                 {
+                    Main.instance.LoggerInstance.Error($"Failed to load replay `{currentReplayPath}':{e}");
+                    
                     table.replayNameText.text = "Invalid Replay";
                     table.indexText.text = "Invalid Replay";
                     HideMetadata();
@@ -567,11 +646,12 @@ public class ReplayGlobals
             
             SelectReplay(previousIndex);
         }
+        
 
         public static void LoadReplays()
         {
             replayPaths = Directory
-                .GetFiles(replayFolder, "*.replay")
+                .GetFiles(replayFolder, "*.replay", SearchOption.AllDirectories)
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .ToList();
 
@@ -596,6 +676,7 @@ public class ReplayGlobals
 
             SelectReplay(currentIndex);
         }
+        
 
         static void ApplyTMPSettings(TextMeshPro text, float horizontal, float vertical)
         {
@@ -671,7 +752,8 @@ public class ReplayGlobals
             }
         }
         
-        public static void LoadCrystals()
+        
+        public static void LoadCrystals(string scene)
         {
             string path = Path.Combine(
                 MelonEnvironment.UserDataDirectory,
@@ -726,6 +808,7 @@ public class ReplayGlobals
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             File.WriteAllText(path, json);
         }
+        
 
         public static Crystal FindClosestCrystal(Vector3 handPos, float maxDistance)
         {
@@ -748,6 +831,7 @@ public class ReplayGlobals
             return closest;
         }
 
+        
         public static Crystal CreateCrystal(Vector3 position, ReplaySerializer.ReplayHeader header, bool useAnimation = false, bool applyRandomColor = false)
         {
             if (crystalParent == null)
@@ -892,6 +976,7 @@ public class ReplayGlobals
                 }
             );
         }
+        
 
         public static IEnumerator CrystalSpawnAnimation(Crystal crystal)
         {
@@ -941,6 +1026,7 @@ public class ReplayGlobals
                 0.05f,
                 Utilities.EaseInOut
             ));
+            
 
             yield return Utilities.LerpValue(
                 () => crystal.transform.localRotation,
@@ -993,23 +1079,8 @@ public class ReplayGlobals
                 basePosition = transform.position;
                 lastPosition = transform.position;
             }
-
-            public void ApplyVisuals()
-            {
-                Color baseColor = BaseColor;
-
-                rend ??= GetComponent<Renderer>();
-                mpb ??= new MaterialPropertyBlock();
-                
-                rend.GetPropertyBlock(mpb);
-                
-                mpb.SetColor("_Base_Color", baseColor);
-                mpb.SetColor("_Edge_Color", DeriveEdge(baseColor));
-                mpb.SetColor("_Shadow_Color", DeriveShadow(baseColor));
-
-                rend.SetPropertyBlock(mpb);
-            }
-
+            
+            
             public CrystalState CaptureState()
             {
                 return new CrystalState
@@ -1037,6 +1108,23 @@ public class ReplayGlobals
                 
                 ApplyVisuals();
             }
+            
+            public void ApplyVisuals()
+            {
+                Color baseColor = BaseColor;
+
+                rend ??= GetComponent<Renderer>();
+                mpb ??= new MaterialPropertyBlock();
+                
+                rend.GetPropertyBlock(mpb);
+                
+                mpb.SetColor("_Base_Color", baseColor);
+                mpb.SetColor("_Edge_Color", DeriveEdge(baseColor));
+                mpb.SetColor("_Shadow_Color", DeriveShadow(baseColor));
+
+                rend.SetPropertyBlock(mpb);
+            }
+            
 
             public void ShowText()
             {
@@ -1062,7 +1150,8 @@ public class ReplayGlobals
                         Vector3.Lerp,
                         scale,
                         0.5f,
-                        Utilities.EaseInOut
+                        Utilities.EaseInOut,
+                        isValid: () => titleText.transform != null
                     )
                 );
 
@@ -1076,10 +1165,12 @@ public class ReplayGlobals
                         Vector3.Lerp,
                         position,
                         0.5f,
-                        Utilities.EaseInOut
+                        Utilities.EaseInOut,
+                        isValid: () => titleText.transform != null
                     )
                 );
             }
+            
 
             public void Grab()
             {
@@ -1101,6 +1192,7 @@ public class ReplayGlobals
 
                 isGrabbed = false;
             }
+            
 
             void Update()
             {
@@ -1125,6 +1217,7 @@ public class ReplayGlobals
                     HideText();
                 }
             }
+            
 
             void HandleProximity()
             {
@@ -1179,6 +1272,7 @@ public class ReplayGlobals
                     smooth
                 );
             }
+            
 
             static Color DeriveEdge(Color baseColor)
             {
@@ -1247,7 +1341,7 @@ public class ReplayGlobals
             {
                 ActorId = playerId,
                 FileName = fileName,
-                StartTime = Main.elapsedRecordingTime
+                StartTime = Time.time
             });
 
             string path = Path.Combine(

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -8,7 +9,9 @@ using Il2CppRUMBLE.Players.Scaling;
 using Newtonsoft.Json;
 using UnityEngine;
 using System.Threading.Tasks;
-using Il2CppSystem.Collections.Generic;
+using Il2CppPhoton.Pun;
+using Il2CppRUMBLE.Players;
+using MelonLoader;
 using Utilities = RumbleAnimator.ReplayGlobals.Utilities;
 using ReplayFiles = RumbleAnimator.ReplayGlobals.ReplayFiles;
 using BinaryReader = System.IO.BinaryReader;
@@ -81,6 +84,22 @@ public static class BinaryExtensions
         bw.Write((byte)1);
         bw.Write(v);
     }
+
+    public static void Write<TField>(this BinaryWriter bw, TField field, float f) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)4);
+        bw.Write(f);
+    }
+
+    public static void Write<TField>(this BinaryWriter bw, TField field, string s) where TField : Enum
+    {
+        var bytes = Encoding.UTF8.GetBytes(s);
+        
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)bytes.Length);
+        bw.Write(bytes);
+    }
 }
 
 public class ReplaySerializer
@@ -98,6 +117,7 @@ public class ReplaySerializer
         public string Version;
         public string Scene;
         public string Date;
+        
         public float Duration;
 
         public int FrameCount;
@@ -107,6 +127,9 @@ public class ReplaySerializer
         public PlayerInfo[] Players;
         public StructureInfo[] Structures;
     }
+    
+    
+    // ----- Helpers -----
     
     static bool PosChanged(Vector3 a, Vector3 b)
     {
@@ -118,10 +141,10 @@ public class ReplaySerializer
         return Quaternion.Angle(a, b) > ROT_EPS_ANGLE;
     }
     
-    static bool WriteIf(
-        bool condition,
-        Action write
-    )
+    
+    // ----- Field-based diffs -----
+    
+    static bool WriteIf(bool condition, Action write)
     {
         if (!condition)
             return false;
@@ -129,6 +152,7 @@ public class ReplaySerializer
         write();
         return true;
     }
+    
     
     static bool WriteStructureDiff(BinaryWriter w, StructureState prev, StructureState curr)
     {
@@ -231,6 +255,21 @@ public class ReplaySerializer
             () => w.Write(PlayerField.active, curr.active)
         );
 
+        any |= WriteIf(
+            prev.activeShiftstoneVFX != curr.activeShiftstoneVFX,
+            () => w.Write(PlayerField.activeShiftstoneVFX, (byte)curr.activeShiftstoneVFX)
+        );
+
+        any |= WriteIf(
+            prev.leftShiftstone != curr.leftShiftstone,
+            () => w.Write(PlayerField.leftShiftstone, (byte)curr.leftShiftstone)
+        );
+        
+        any |= WriteIf(
+            prev.rightShiftstone != curr.rightShiftstone,
+            () => w.Write(PlayerField.rightShiftstone, (byte)curr.rightShiftstone)
+        );
+
         return any;
     }
 
@@ -270,12 +309,45 @@ public class ReplaySerializer
             () => w.Write(EventField.rotation, e.rotation)
         );
 
+        any |= WriteIf(
+            !string.IsNullOrEmpty(e.masterId),
+            () => w.Write(EventField.masterId, e.masterId)
+        );
+
+        any |= WriteIf(
+            e.playerIndex > -1,
+            () => w.Write(EventField.playerIndex, e.playerIndex)
+        );
+
+        any |= WriteIf(
+            e.Length > 0,
+            () => w.Write(EventField.length, e.Length)
+        );
+        
+        any |= WriteIf(
+            e.ArmSpan > 0,
+            () => w.Write(EventField.armspan, e.ArmSpan)
+        );
+
+        any |= WriteIf(
+            e.markerType != MarkerType.None,
+            () => w.Write(EventField.markerType, (byte)e.markerType)
+        );
+
+        any |= WriteIf(
+            e.damage != 0,
+            () => w.Write(EventField.damage, (byte)e.damage)
+        );
+
         return any;
     }
     
+    
+    // ----- Serialization -----
+    
     public static async Task BuildReplayPackage(
-        string outputPath,
-        ReplayInfo replay,
+        string outputPath, 
+        ReplayInfo replay, 
         Action done = null
     )
     {
@@ -283,6 +355,18 @@ public class ReplaySerializer
 
         byte[] compressedReplay = await Task.Run(() => Compress(rawReplay));
 
+        MelonCoroutines.Start(FinishOnMainThread(outputPath, replay, compressedReplay, done));
+    }
+
+    static IEnumerator FinishOnMainThread(
+        string outputPath,
+        ReplayInfo replay,
+        byte[] compressedReplay,
+        Action done
+    )
+    {
+        yield return null;
+        
         string manifestJson = JsonConvert.SerializeObject(
             replay.Header,
             Formatting.Indented
@@ -298,8 +382,8 @@ public class ReplaySerializer
             var replayEntry = zip.CreateEntry("replay", CompressionLevel.NoCompression);
             using (var stream = replayEntry.Open())
                 stream.Write(compressedReplay, 0, compressedReplay.Length);
-        }    
-        
+        }
+
         done?.Invoke();
     }
     
@@ -434,6 +518,8 @@ public class ReplaySerializer
         return ms.ToArray();
     }
     
+    
+    // ----- Codec -----
     public static byte[] Compress(byte[] data)
     {
         using (var ms = new MemoryStream())
@@ -455,13 +541,16 @@ public class ReplaySerializer
         brotli.CopyTo(output);
         return output.ToArray();
     }
-
+    
+    
     public static string FormatReplayString(string pattern, ReplayHeader header)
     {
         var scene = Utilities.GetFriendlySceneName(header.Scene);
         var customMap = header.CustomMap;
         var finalScene = string.IsNullOrEmpty(customMap) ? scene : customMap;
-        var parsedDate = DateTime.Parse(header.Date);
+        var parsedDate = string.IsNullOrEmpty(header.Date)
+            ? DateTime.MinValue
+            : DateTime.Parse(header.Date);
         var duration = TimeSpan.FromSeconds(header.Duration);
         
         string GetPlayer(int index) =>
@@ -474,7 +563,7 @@ public class ReplaySerializer
             ["LocalPlayer"] = $"<#FFF>{header.Players?[0]?.Name}<#FFF>",
             ["Scene"] = finalScene,
             ["Map"] = finalScene,
-            ["DateTime"] = parsedDate,
+            ["DateTime"] = parsedDate == DateTime.MinValue ? "Unknown Date" : parsedDate,
             ["PlayerCount"] = $"{header.Players?.Length ?? 0} Player{((header.Players?.Length ?? 0) == 1 ? "" : "s")}",
             ["Version"] = header.Version ?? "",
             ["StructureCount"] = (header.Structures?.Length.ToString() ?? "0") + " Structure" + ((header.Structures?.Length ?? 0) == 1 ? "" : "s"),
@@ -514,7 +603,10 @@ public class ReplaySerializer
             return match.Value;
         });
     }
-
+    
+    
+    // ----- Manifest -----
+    
     public static ReplayHeader GetManifest(string path)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -552,7 +644,10 @@ public class ReplaySerializer
         
         ReplayFiles.suppressWatcher = false;
     }
+    
 
+    // ----- Deserialization -----
+    
     public static ReplayInfo LoadReplay(string path)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read);
@@ -609,13 +704,13 @@ public class ReplaySerializer
 
         return replayInfo;
     }
-
+    
     private static Frame[] ReadFrames(
-        BinaryReader br,
-        ReplayInfo info,
-        int frameCount,
-        int structureCount,
-        int playerCount,
+        BinaryReader br, 
+        ReplayInfo info, 
+        int frameCount, 
+        int structureCount, 
+        int playerCount, 
         int pedestalCount
     )
     {
@@ -637,7 +732,7 @@ public class ReplaySerializer
             frame.Structures = Utilities.NewArray(structureCount, lastStructures);
             frame.Players = Utilities.NewArray(playerCount, lastPlayers);
             frame.Pedestals = Utilities.NewArray(pedestalCount, lastPedestals);
-            List<EventChunk> events = null;
+            var events = new System.Collections.Generic.List<EventChunk>();
             
             int entryCount = br.ReadInt32();
 
@@ -672,15 +767,12 @@ public class ReplaySerializer
                         break;
                     }
 
-                    // case ChunkType.Event:
-                    // {
-                    //     var evt = ReadEventChunk(br);
-                    //
-                    //     events ??= new();
-                    //     events.Add(evt);
-                    //     
-                    //     break;
-                    // }
+                    case ChunkType.Event:
+                    {
+                        var evt = ReadEventChunk(br);
+                        events.Add(evt);
+                        break;
+                    }
 
                     default:
                     {
@@ -697,16 +789,18 @@ public class ReplaySerializer
 
             frames[f] = frame;
         }
-
         return frames;
+        
     }
-
+    
+    
+    // ----- Chunk Reading -----
+    
     static T ReadChunk<T, TField>(
-        BinaryReader br,
-        Func<T> ctor,
+        BinaryReader br, 
+        Func<T> ctor, 
         Action<T, TField, BinaryReader> readField
-    )
-        where TField : Enum
+    ) where TField : Enum
     {
         int len = br.ReadInt32();
         long end = br.BaseStream.Position + len;
@@ -734,6 +828,7 @@ public class ReplaySerializer
 
         return state;
     }
+    
 
     static PlayerState ReadPlayerChunk(BinaryReader br, PlayerState baseState)
     {
@@ -755,6 +850,10 @@ public class ReplaySerializer
                     case PlayerField.currentStack: p.currentStack = r.ReadInt16(); break;
                     case PlayerField.Health: p.Health = r.ReadInt16(); break;
                     case PlayerField.active: p.active = r.ReadBoolean(); break;
+                    case PlayerField.activeShiftstoneVFX: 
+                        p.activeShiftstoneVFX = (PlayerShiftstoneVFX)r.ReadByte(); break;
+                    case PlayerField.leftShiftstone: p.leftShiftstone = r.ReadByte(); break;
+                    case PlayerField.rightShiftstone: p.rightShiftstone = r.ReadByte(); break;
                 }
             }
         );
@@ -809,6 +908,12 @@ public class ReplaySerializer
                     case EventField.type: e.type = (EventType)r.ReadByte(); break;
                     case EventField.position: e.position = r.ReadVector3(); break;
                     case EventField.rotation: e.rotation = r.ReadQuaternion(); break;
+                    case EventField.masterId: e.masterId = r.ReadString(); break;
+                    case EventField.playerIndex: e.playerIndex = r.ReadInt32(); break;
+                    case EventField.armspan: e.ArmSpan = r.ReadSingle(); break;
+                    case EventField.length: e.Length = r.ReadSingle(); break;
+                    case EventField.markerType: e.markerType = (MarkerType)r.ReadByte(); break;
+                    case EventField.damage: e.damage = r.ReadInt32(); break;
                 }
             }
         );
@@ -830,6 +935,18 @@ public class Frame
     public PlayerState[] Players;
     public PedestalState[] Pedestals;
     public EventChunk[] Events;
+
+    public Frame Clone()
+    {
+        var frame = new Frame();
+        frame.Time = Time;
+        frame.Structures = Utilities.NewArray(Structures.Length, Structures);
+        frame.Players = Utilities.NewArray(Players.Length, Players);
+        frame.Pedestals = Utilities.NewArray(Pedestals.Length, Pedestals);
+        frame.Events = Utilities.NewArray(Events.Length, Events);
+
+        return frame;
+    }
 }
 
 // ------- Structure State -------
@@ -911,6 +1028,11 @@ public class PlayerState
     public short Health;
     public bool active;
 
+    public PlayerShiftstoneVFX activeShiftstoneVFX;
+    
+    public int leftShiftstone;
+    public int rightShiftstone;
+
     public PlayerState Clone()
     {
         return new PlayerState
@@ -925,7 +1047,10 @@ public class PlayerState
             HeadRot = HeadRot,
             currentStack = currentStack,
             Health = Health,
-            active = active
+            active = active,
+            activeShiftstoneVFX = activeShiftstoneVFX,
+            leftShiftstone = leftShiftstone,
+            rightShiftstone = rightShiftstone
         };
     }
 }
@@ -943,6 +1068,23 @@ public class PlayerInfo
     public PlayerMeasurement Measurement;
 
     public bool WasHost;
+
+    public PlayerInfo(Player copyPlayer)
+    {
+        var player = copyPlayer.Data;
+
+        ActorId = (byte)player.GeneralData.ActorNo;
+        MasterId = player.GeneralData.PlayFabMasterId;
+        Name = player.GeneralData.PublicUsername;
+        BattlePoints = player.GeneralData.BattlePoints;
+        VisualData = player.VisualData.ToPlayfabDataString();
+        EquippedShiftStones = player.EquipedShiftStones.ToArray();
+        Measurement = player.PlayerMeasurement;
+        WasHost = (player.GeneralData.ActorNo == PhotonNetwork.MasterClient?.ActorNumber);
+    }
+    
+    [JsonConstructor]
+    public PlayerInfo() { }
 }
 
 public enum PlayerField {
@@ -961,7 +1103,35 @@ public enum PlayerField {
     currentStack,
     
     Health,
-    active
+    active,
+    
+    activeShiftstoneVFX,
+    leftShiftstone,
+    rightShiftstone
+}
+
+[Flags]
+public enum PlayerShiftstoneVFX : byte
+{
+    None = 0,
+    Charge = 1 << 0,
+    Adamant = 1 << 1,
+    Vigor = 1 << 2,
+    Surge = 1 << 3
+}
+
+[Serializable]
+public enum PlayerShiftstones : byte
+{
+    None,
+    Vigor,
+    Guard,
+    Flow,
+    Stubborn,
+    Charge,
+    Volatile,
+    Surge,
+    Adamant
 }
 
 [Serializable]
@@ -1022,16 +1192,25 @@ public class EventChunk
     // General Info
     public Vector3 position;
     public Quaternion rotation;
-    public string playerId;
+    public string masterId;
+    public int playerIndex;
 
     // Player measurement
     public float Length;
     public float ArmSpan;
+    
+    // Marker
+    public MarkerType markerType;
+    
+    // Damage HitMarker
+    public int damage;
 }
 
 public enum EventType : byte
 {
-    PlayerMeasurement
+    PlayerMeasurement,
+    Marker,
+    DamageHitmarker
 }
 
 public enum EventField
@@ -1039,9 +1218,22 @@ public enum EventField
     type,
     position,
     rotation,
-    playerId,
+    masterId,
     length,
-    armspan
+    armspan,
+    markerType,
+    playerIndex,
+    damage
+}
+
+[Serializable]
+public enum MarkerType : byte
+{
+    None,
+    Manual,
+    RoundEnd,
+    MatchEnd,
+    LargeDamage
 }
 
 // ------------------------

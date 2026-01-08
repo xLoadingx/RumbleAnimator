@@ -11,12 +11,13 @@
     <Reference Include="ModUI">
       <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\ModUI.dll</HintPath>
     </Reference>
-    <Reference Include="Newtonsoft.Json">
-      <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\net6\Newtonsoft.Json.dll</HintPath>
-    </Reference>
 
     <Reference Include="RumbleModdingAPI">
       <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\rumblemoddingapi.dll</HintPath>
+    </Reference>
+
+    <Reference Include="RumbleModUIPlus">
+      <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\RumbleModUIPlus.dll</HintPath>
     </Reference>
     </ItemGroup>
   
@@ -34,6 +35,8 @@
   
     <ItemGroup>
       <EmbeddedResource Include="src\replayobjects" />
+      <None Remove="src\replayobjects2" />
+      <EmbeddedResource Include="src\replayobjects2" />
     </ItemGroup>
 
     <Target Name="PostBuild" AfterTargets="PostBuildEvent">

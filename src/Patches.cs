@@ -1,14 +1,16 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Players;
-using Il2CppPhoton.Pun;
 using Il2CppRUMBLE.Players.Scaling;
 using Il2CppRUMBLE.Players.Subsystems;
-using MelonLoader;
+using Il2CppRUMBLE.Pools;
 using UnityEngine;
+using UnityEngine.VFX;
+using static UnityEngine.Mathf;
 
 namespace RumbleAnimator;
 
@@ -16,6 +18,12 @@ public class Patches
 {
     public static List<(string playerId, short stackId)> activations = new();
 
+    public static Dictionary<string, Queue<(float time, int damage)>> damageQueues = new();
+    public static Dictionary<string, float> lastLargeDamageTime = new();
+    
+    public static int GetPlayerIndex(Player player) => Main.instance.RecordedPlayers.IndexOf(player);
+    
+    // ----- Pools -----
     [HarmonyPatch(typeof(PoolManager), nameof(PoolManager.Instantiate))]
     public class Patch_PoolManager_Instantiate
     {
@@ -37,6 +45,40 @@ public class Patches
         }
     }
 
+    [HarmonyPatch(typeof(Pool<PooledMonoBehaviour>), nameof(Pool<PooledMonoBehaviour>.FetchFromPool))]
+    [HarmonyPatch(new[] { typeof(Vector3), typeof(Quaternion) })]
+    public class Patch_PoolMonoBehavior_FetchFromPool
+    {
+        static void Postfix(PooledMonoBehaviour __result, Vector3 position, Quaternion rotation)
+        {
+            var vfx = __result.GetComponent<VisualEffect>();
+            if (vfx != null)
+            {
+                if (vfx.name == "Jump_VFX" && Main.instance.PlaybackPlayers != null && Main.instance.PlaybackPlayers.Length > 0)
+                {
+                    float minDistance = Main.instance.PlaybackPlayers
+                        .Select(player => Vector3.Distance(player.Controller.transform.GetChild(1).GetChild(2).position, vfx.transform.position))
+                        .Prepend(999f)
+                        .Min();
+
+                    if (minDistance < 0.2f)
+                    {
+                        vfx.playRate = Abs(Main.playbackSpeed);
+                        vfx.GetComponent<PooledVisualEffect>().returnToPoolTime = -1f;
+                        vfx.transform.SetParent(Main.instance.VFXParent.transform);
+                    }
+                        
+                }
+                else
+                {
+                    vfx.playRate = 1;
+                }
+            }
+        }
+    }
+    
+    // ----- Events -----
+    
     [HarmonyPatch(typeof(PlayerScaling), nameof(PlayerScaling.ScaleController))]
     public class Patch_PlayerScaling_ScaleController
     {
@@ -53,7 +95,7 @@ public class Patches
                 {
                     Length = measurement.Length, 
                     ArmSpan = measurement.ArmSpan, 
-                    playerId = __instance.ParentController.AssignedPlayer.Data.GeneralData.PlayFabMasterId
+                    playerIndex = GetPlayerIndex(__instance.ParentController.assignedPlayer)
                 };
 
                 Main.instance.Events.Add(chunk);
@@ -61,6 +103,66 @@ public class Patches
         }
     }
 
+    [HarmonyPatch(typeof(PlayerHealth), nameof(PlayerHealth.ReduceHealth))]
+    public class Patch_PlayerHealth_ReduceHealth
+    {
+        static void Postfix(PlayerHealth __instance, short amount, bool useEffects)
+        {
+            if (!Main.isRecording && !Main.isBuffering)
+                return;
+            
+            string playerId = __instance.parentController.assignedPlayer.Data.GeneralData.PlayFabMasterId;
+
+            if (!damageQueues.TryGetValue(playerId, out var queue))
+            {
+                queue = new Queue<(float, int)>();
+                damageQueues[playerId] = queue;
+            }
+
+            float time = Main.lastSampleTime;
+            queue.Enqueue((time, amount));
+
+            int sum = 0;
+            while (queue.Count > 0 && queue.Peek().time < time - 3f)
+                queue.Dequeue();
+
+            foreach (var e in queue)
+                sum += e.damage;
+
+            float lastTime = lastLargeDamageTime.GetValueOrDefault(playerId, -999f);
+
+            if (sum >= 7 && time - lastTime >= 3f)
+            {
+                lastLargeDamageTime[playerId] = time;
+                queue.Clear();
+                
+                Main.instance.Events.Add(new EventChunk
+                {
+                    type = EventType.Marker,
+                    markerType = MarkerType.LargeDamage,
+                    position = Main.instance.head.position,
+                    playerIndex = GetPlayerIndex(__instance.ParentController.assignedPlayer)
+                });
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(PlayerHealth), nameof(PlayerHealth.SpawnHitEffects))]
+    public class Patch_PlayerHealth_SpawnHitEffects
+    {
+        static void Postfix(PlayerHealth __instance, short damage, Vector3 position)
+        {
+            Main.instance.Events.Add(new EventChunk
+            {
+                damage = damage,
+                position = position,
+                playerIndex = GetPlayerIndex(__instance.ParentController.assignedPlayer)
+            });
+        }
+    }
+    
+    // ----- Late-Player joining/leaving -----
+    
     [HarmonyPatch(typeof(PlayerController), nameof(PlayerController.Initialize))]
     public class Patch_PlayerController_Initialize
     {
@@ -84,17 +186,7 @@ public class Patches
             Main.instance.MasterIdToIndex[id] = index;
             Main.instance.RecordedPlayers.Add(player);
 
-            var info = new PlayerInfo
-            {
-                ActorId = (byte)player.Data.GeneralData.ActorNo,
-                MasterId = id,
-                Name = player.Data.GeneralData.PublicUsername,
-                BattlePoints = player.Data.GeneralData.BattlePoints,
-                VisualData = player.Data.VisualData.ToPlayfabDataString(),
-                EquippedShiftStones = player.Data.EquipedShiftStones.ToArray(),
-                Measurement = player.Data.PlayerMeasurement,
-                WasHost = (player.Data.GeneralData.ActorNo == PhotonNetwork.MasterClient?.ActorNumber)
-            };
+            var info = new PlayerInfo(player);
 
             Main.instance.PlayerInfos.Add(info);
         }
@@ -114,7 +206,9 @@ public class Patches
                 Main.instance.RecordedPlayers[idx] = null;
         }
     }
+    
 
+    // ----- Stack Recording -----
     [HarmonyPatch(typeof(PlayerStackProcessor), nameof(PlayerStackProcessor.Execute))]
     public class Patch_PlayerStackProcessor_Execute
     {
@@ -122,7 +216,7 @@ public class Patches
         {
             if (!Main.isRecording && !Main.isBuffering)
                 return;
-            
+
             if (ReplayGlobals.ReplayCache.NameToStackType.TryGetValue(stack.cachedName, out var type))
                 activations.Add((__instance.ParentController.assignedPlayer.Data.GeneralData.PlayFabMasterId, (short)type));
         }

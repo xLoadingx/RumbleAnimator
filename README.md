@@ -17,7 +17,7 @@ It is primarily intended for:
 - You can also do this same hand gesture again to stop and save the recording.
 
 ### Playback
-While a replay is playing, you can do the above hand gesture **but** with both triggers held down
+While a replay is playing, you can do the above hand gesture **but** with both triggers held down  
 This brings up a control menu.
 
 ### Replay Buffer

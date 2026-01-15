@@ -42,21 +42,6 @@ To load back the replay using these crystals, you can put (or throw) it back on 
 
 ---
 
-### Features
-- Records player, structure, and pedestal transforms
-- Delta-compressed per-field binary frames
-- Brotli-compressed replay stream inside a `.replay` container (ZIP)
-- `manifest.json` metadata included for each replay
-- Imhex pattern file for inspecting replays
-- Replay buffer with customizable duration and controller-based trigger
-- Auto-recording support for matches and parks
-- Custom gesture for starting/stopping a recording
-- Replay Table in Gym for browsing, selecting, and loading replays
-- Crystals for saving and placing replays physically in the world
-- Metadata and title generation from configurable format files
-
----
-
 ## Replay Format
 The replay format is documented [here](ReplayFormat)
 

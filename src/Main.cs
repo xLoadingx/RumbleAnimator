@@ -45,7 +45,7 @@ namespace RumbleAnimator;
 
 public static class BuildInfo
 {
-    public const string Name = "RumbleReplay";
+    public const string Name = "RumbleAnimator";
     public const string Author = "ERROR";
     public const string Version = "1.0.0";
     public const string FormatVersion = "1.0.0";

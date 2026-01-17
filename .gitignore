@@ -1,3 +1,5 @@
+.ref/
+.ref
 bin/
 obj/
 /packages/

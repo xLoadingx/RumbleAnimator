@@ -40,6 +40,7 @@ using Utilities = RumbleAnimator.ReplayGlobals.Utilities;
 
 [assembly: MelonInfo(typeof(RumbleAnimator.Main), RumbleAnimator.BuildInfo.Name, RumbleAnimator.BuildInfo.Version, RumbleAnimator.BuildInfo.Author)]
 [assembly: MelonGame("Buckethead Entertainment", "RUMBLE")]
+[assembly: MelonAdditionalDependencies("RumbleModdingAPI","RumbleModUIPlus")]
 
 namespace RumbleAnimator;
 

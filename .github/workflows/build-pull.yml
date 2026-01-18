@@ -1,0 +1,10 @@
+name: Trigger Debug build for pull requests
+on:
+  pull_request_target:
+    paths:
+      - "src/**"
+
+jobs:
+  buildpull:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit

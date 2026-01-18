@@ -31,12 +31,14 @@ using static UnityEngine.Mathf;
 
 using InteractionButton = Il2CppRUMBLE.Interactions.InteractionBase.InteractionButton;
 using Mod = RumbleModUIPlus.Mod;
+using Random = UnityEngine.Random;
 using ReplayFiles = RumbleAnimator.ReplayGlobals.ReplayFiles;
 using ReplayCache = RumbleAnimator.ReplayGlobals.ReplayCache;
 using ReplayCrystals = RumbleAnimator.ReplayGlobals.ReplayCrystals;
 using Stack = Il2CppRUMBLE.MoveSystem.Stack;
 using Tags = RumbleModUIPlus.Tags;
 using Utilities = RumbleAnimator.ReplayGlobals.Utilities;
+using ReplayPlaybackControls = RumbleAnimator.ReplayGlobals.ReplayPlaybackControls;
 
 [assembly: MelonInfo(typeof(RumbleAnimator.Main), RumbleAnimator.BuildInfo.Name, RumbleAnimator.BuildInfo.Version, RumbleAnimator.BuildInfo.Author)]
 [assembly: MelonGame("Buckethead Entertainment", "RUMBLE")]
@@ -72,6 +74,12 @@ public class Main : MelonMod
     public static bool isRecording = false;
     
     public static float lastSampleTime = 0f;
+
+    public int pingSum;
+    public int pingCount;
+    public int pingMin = int.MaxValue;
+    public int pingMax = 0;
+    public static float pingTimer = 0f;
     
     public List<Frame> Frames = new();
     public List<EventChunk> Events = new();
@@ -81,13 +89,11 @@ public class Main : MelonMod
     public List<GameObject> Pedestals = new();
     public string recordingSceneName;
 
-    // Renderer state (recording)
-    public List<(MeshRenderer renderer, MaterialPropertyBlock mpb)> structureRenderers = new();
-
     // Players
     public List<Player> RecordedPlayers = new();
     public Dictionary<string, int> MasterIdToIndex = new();
     public List<PlayerInfo> PlayerInfos = new();
+    public List<StructureInfo> StructureInfos = new();
     
     // Recording FX / timers
     public GameObject clapperboardVFX;
@@ -116,7 +122,6 @@ public class Main : MelonMod
     // Structures
     public GameObject[] PlaybackStructures;
     public HashSet<Structure> HiddenStructures = new();
-    public (MeshRenderer renderer, MaterialPropertyBlock mpb)[] playbackStructureRenderers;
     public PlaybackStructureState[] playbackStructureStates;
     
     // Players
@@ -133,18 +138,9 @@ public class Main : MelonMod
     
     // UI
     public ReplayTable replayTable;
+    public GameObject flatLandRoot;
+    public bool? lastFlatLandActive;
     
-    // Controls
-    public bool playbackControlsOpen;
-    
-    public GameObject playbackControls;
-    public GameObject timeline;
-    public TextMeshPro totalDuration;
-    public TextMeshPro currentDuration;
-    public TextMeshPro playbackTitle;
-    public TextMeshPro playbackSpeedText;
-    
-    public GameObject markerPrefab;
     
     // ------ Settings ------
     
@@ -157,6 +153,9 @@ public class Main : MelonMod
     public ModSetting<bool> AutoRecordMatches = new();
     public ModSetting<bool> AutoRecordParks = new();
     
+    public ModSetting<bool> HandFingerRecording = new();
+    public ModSetting<bool> CloseHandsOnPose = new();
+    
     // Automatic Markers - Match End
     public ModSetting<bool> EnableMatchEndMarker = new();
     
@@ -167,6 +166,9 @@ public class Main : MelonMod
     public ModSetting<bool> EnableLargeDamageMarker = new();
     public ModSetting<int> DamageThreshold = new();
     public ModSetting<float> DamageWindow = new();
+    
+    // Playback
+    public ModSetting<bool> StopReplayWhenDone = new();
     
     // Replay Buffer
     public ModSetting<bool> ReplayBufferEnabled = new();
@@ -210,6 +212,9 @@ public class Main : MelonMod
         
         Calls.onRoundEnded += () =>
         {
+            if (!(bool)EnableRoundEndMarker.SavedValue)
+                return;
+            
             EventChunk evt = new EventChunk
             {
                 type = EventType.Marker,
@@ -221,7 +226,10 @@ public class Main : MelonMod
 
         Calls.onMatchEnded += () =>
         {
-            if (isRecording) StopRecording(); 
+            if (isRecording) StopRecording();
+
+            if (!(bool)EnableMatchEndMarker.SavedValue)
+                return;
             
             EventChunk evt = new EventChunk
             {
@@ -234,6 +242,12 @@ public class Main : MelonMod
         
         ReplayFiles.Init();
     }
+    
+    private IEnumerator ListenForFlatLand()
+    {
+        yield return new WaitForSeconds(1f);
+        flatLandRoot = GameObject.Find("FlatLand");
+    }
 
     public override void OnApplicationQuit()
     {
@@ -244,20 +258,34 @@ public class Main : MelonMod
     public override void OnSceneWasLoaded(int buildIndex, string sceneName)
     {
         currentScene = sceneName;
-        
+
         if (isRecording)
             StopRecording();
 
         if (isPlaying)
+        {
+            LoggerInstance.Msg("Stopped replay [OnSceneWasLoaded]");
             StopReplay();
+        }
+
+        if (sceneName == "Gym")
+            MelonCoroutines.Start(ListenForFlatLand());
 
         replayBuffer.Clear();
         lastSampleTime = 0f;
+
+        if (currentScene == "Gym")
+            isReplayScene = false;
+
+        pingCount = 0;
+        pingSum = 0;
+        pingMin = int.MaxValue;
+        pingMax = 0;
     }
 
     public void OnMapInitialized()
     {
-        if ((currentScene is "Map0" or "Map1" && (bool)AutoRecordMatches.SavedValue && PlayerManager.instance.AllPlayers.Count > 1) || (currentScene == "Park" && (bool)AutoRecordParks.SavedValue))
+        if (((currentScene is "Map0" or "Map1" && (bool)AutoRecordMatches.SavedValue && PlayerManager.instance.AllPlayers.Count > 1) || (currentScene == "Park" && (bool)AutoRecordParks.SavedValue)) && !isReplayScene)
             StartRecording();
 
         if ((ReplayCache.SFX == null || ReplayCache.structurePools == null) && currentScene != "Loader")
@@ -282,9 +310,6 @@ public class Main : MelonMod
             
             replayTable.tableOffset = 0f;
             replayTable.transform.localRotation = Quaternion.Euler(270, 121.5819f, 0);
-            
-            ReplayCrystals.LoadCrystals("Gym");
-            ReplayFiles.ReloadReplays();
         }
         else if (currentScene == "Park")
         {
@@ -297,14 +322,28 @@ public class Main : MelonMod
             replayTable.transform.localRotation = Quaternion.Euler(270f, 0, 0);
 
             if (isReplayScene)
-            {
-                isReplayScene = false;
-
                 MelonCoroutines.Start(DelayedParkLoad());
-            }
 
-            // ReplayCrystals.LoadCrystals("Park");
-            ReplayFiles.LoadReplays();
+        } 
+        else if (currentScene == "Map0" && PlayerManager.instance.AllPlayers.Count == 1)
+        {
+            replayTable.TableRoot.SetActive(true);
+            replayTable.metadataText.gameObject.SetActive(true);
+
+            replayTable.tableFloat.startPos = new Vector3(0.411f, -4.4577f, 18.312f);
+            replayTable.metadataTextFloat.startPos = new Vector3(0.411f, -4.027f, 18.3094f);
+            replayTable.tableOffset = -6;
+            replayTable.transform.localRotation = Quaternion.Euler(270f, 90f, 0f);
+        } 
+        else if (currentScene == "Map1" && PlayerManager.instance.AllPlayers.Count == 1)
+        {
+            replayTable.TableRoot.SetActive(true);
+            replayTable.metadataText.gameObject.SetActive(true);
+
+            replayTable.tableFloat.startPos = new Vector3(0.991f, 1.1872f, 9.8221f);
+            replayTable.metadataTextFloat.startPos = new Vector3(0.991f, 1.1872f, 9.8221f);
+            replayTable.tableOffset = -0.35f;
+            replayTable.transform.localRotation = Quaternion.Euler(270f, 90f, 0f);
         }
         else
         {
@@ -312,7 +351,10 @@ public class Main : MelonMod
             replayTable.metadataText.gameObject.SetActive(false);
         }
         
-        ClosePlaybackControls();
+        ReplayCrystals.LoadCrystals(currentScene);
+        ReplayFiles.LoadReplays();
+        
+        ReplayPlaybackControls.Close();
         
         if (currentScene != "Loader")
             StartBuffering();
@@ -339,6 +381,20 @@ public class Main : MelonMod
         yield return new WaitForSeconds(1f);
         
         LoadReplay(ReplayFiles.currentReplayPath);
+        SimpleScreenFadeInstance.Progress = 0f;
+    }
+
+    IEnumerator DelayedFlatLandLoad()
+    {
+        if (flatLandRoot == null) yield break;
+
+        while (flatLandRoot.activeSelf)
+            yield return null;
+        
+        yield return new WaitForSeconds(1f);
+
+        LoadReplay(ReplayFiles.currentReplayPath);
+        SimpleScreenFadeInstance.Progress = 0f;
     }
 
     public void OnUIInitialized()
@@ -347,14 +403,17 @@ public class Main : MelonMod
         rumbleAnimatorMod.ModVersion = BuildInfo.Version;
         rumbleAnimatorMod.ModFormatVersion = BuildInfo.FormatVersion;
 
-        rumbleAnimatorMod.SetFolder("MatchReplays");
+        rumbleAnimatorMod.SetFolder("RumblePlayback/Settings");
         rumbleAnimatorMod.AddDescription("Description", "", "A mod that records scenes into a 3d file that you can replay", new Tags { IsSummary = true });
 
         var recordingFolder = rumbleAnimatorMod.AddFolder("Recording", "Controls how and when gameplay is recorded into replays.");
 
         TargetRecordingFPS = rumbleAnimatorMod.AddToList("Recording FPS", 50, "The target frame rate used when recording replays.\nThis is limited by the game's actual frame rate.", new Tags());
-        AutoRecordMatches = rumbleAnimatorMod.AddToList("Automatically Record Matches", false, 0, "Automatically start recording when you join a match", new Tags());
+        AutoRecordMatches = rumbleAnimatorMod.AddToList("Automatically Record Matches", true, 0, "Automatically start recording when you join a match", new Tags());
         AutoRecordParks = rumbleAnimatorMod.AddToList("Automatically Record Parks", false, 0, "Automatically start recording when you join a park", new Tags());
+        
+        HandFingerRecording = rumbleAnimatorMod.AddToList("Finger Animation Recording", true, 0, "Controls whether finger input values are recorded into the replay.", new Tags());
+        CloseHandsOnPose = rumbleAnimatorMod.AddToList("Close Hands On Pose", true, 0, "Closes the hands of a clone when they do a pose.", new Tags());
         
         var automaticMarkersFolder = rumbleAnimatorMod.AddFolder("Automatic Markers", "Automatically adds markers to replays when notable events occur.");
 
@@ -368,20 +427,27 @@ public class Main : MelonMod
 
         var largeDamageFolder = rumbleAnimatorMod.AddFolder("Large Damage", "Settings for markers triggered by bursts of high damage.");
         EnableLargeDamageMarker = rumbleAnimatorMod.AddToList("Enable Large Damage Marker", false, 0, "Automatically adds a marker when a player takes a large amount of damage in a short amount of time.", new Tags());
-        DamageThreshold = rumbleAnimatorMod.AddToList("Damage Threshold", 7, "The minimum total damage required to create a marker.", new Tags());
-        DamageWindow = rumbleAnimatorMod.AddToList("Damage Window (seconds)", 3f, "The time window (in seconds) during which damage is summed to determine whether a marker should be created.", new Tags());
-        largeDamageFolder.AddSetting(EnableLargeDamageMarker);
-        largeDamageFolder.AddSetting(DamageThreshold);
-        largeDamageFolder.AddSetting(DamageWindow);
-
-        automaticMarkersFolder.AddSetting(matchEndFolder);
-        automaticMarkersFolder.AddSetting(roundEndFolder);
-        automaticMarkersFolder.AddSetting(largeDamageFolder);
+        DamageThreshold = rumbleAnimatorMod.AddToList("Damage Threshold", 12, "The minimum total damage required to create a marker.", new Tags());
+        DamageWindow = rumbleAnimatorMod.AddToList("Damage Window (seconds)", 1f, "The time window (in seconds) during which damage is summed to determine whether a marker should be created.", new Tags());
         
-        recordingFolder.AddSetting(TargetRecordingFPS);
-        recordingFolder.AddSetting(AutoRecordMatches);
-        recordingFolder.AddSetting(AutoRecordParks);
-        recordingFolder.AddSetting(automaticMarkersFolder);
+        largeDamageFolder.AddSetting(EnableLargeDamageMarker)
+            .AddSetting(DamageThreshold)
+            .AddSetting(DamageWindow);
+
+        automaticMarkersFolder.AddSetting(matchEndFolder)
+            .AddSetting(roundEndFolder)
+            .AddSetting(largeDamageFolder);
+        
+        recordingFolder.AddSetting(TargetRecordingFPS)
+            .AddSetting(AutoRecordMatches)
+            .AddSetting(AutoRecordParks)
+            .AddSetting(HandFingerRecording)
+            .AddSetting(CloseHandsOnPose)
+            .AddSetting(automaticMarkersFolder);
+
+        var playbackFolder = rumbleAnimatorMod.AddFolder("Playback", "Settings for playing back replays.");
+        StopReplayWhenDone = rumbleAnimatorMod.AddToList("Stop Replay On Finished", true, 0, "Stops a replay when it reaches the end or beginning of its duration.", new Tags());
+        playbackFolder.AddSetting(StopReplayWhenDone);
 
         var replayBufferFolder = rumbleAnimatorMod.AddFolder("Replay Buffer", "Settings for the replay buffer used to save recent gameplay.");
 
@@ -409,9 +475,9 @@ public class Main : MelonMod
 
         EnableHaptics = rumbleAnimatorMod.AddToList("Enable Haptics", true, 0, "Plays controller haptics when actions such as saving a replay or adding a marker are performed.", new Tags());
 
-        controlsFolder.AddSetting(LeftHandControls);
-        controlsFolder.AddSetting(RightHandControls);
-        controlsFolder.AddSetting(EnableHaptics);
+        controlsFolder.AddSetting(LeftHandControls)
+            .AddSetting(RightHandControls)
+            .AddSetting(EnableHaptics);
         
         var otherFolder = rumbleAnimatorMod.AddFolder("Other", "Miscellaneous settings.");
 
@@ -474,6 +540,9 @@ public class Main : MelonMod
         var tableFloat = ReplayTable.AddComponent<TableFloat>();
         tableFloat.speed = (2 * PI) / 10f;
         tableFloat.amplitude = 0.01f;
+
+        table.layer = LayerMask.NameToLayer("LeanableEnvironment");
+        table.AddComponent<MeshCollider>();
         
         if (Calls.Mods.findOwnMod("Rumble Dark Mode", "Bleh", false))
             table.GetComponent<Renderer>().lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
@@ -634,14 +703,39 @@ public class Main : MelonMod
         crystalizeIcon.transform.localRotation = Quaternion.Euler(270, 0, 0);
         crystalizeIcon.transform.localScale = Vector3.one * 0.07f;
         
-        var sr = crystalizeIcon.AddComponent<SpriteRenderer>();
-        var texture = bundle2.LoadAsset<Texture2D>("CrystalSprite");
-        sr.sprite = Sprite.Create(
-            texture,
-            new Rect(0, 0, texture.width, texture.height),
+        var srC = crystalizeIcon.AddComponent<SpriteRenderer>();
+        var textureC = bundle2.LoadAsset<Texture2D>("CrystalSprite");
+        srC.sprite = Sprite.Create(
+            textureC,
+            new Rect(0, 0, textureC.width, textureC.height),
             new Vector2(0.5f, 0.5f),
             100f
         );
+
+        var heisenhouserIcon = new GameObject("HeisenhouwserIcon");
+        heisenhouserIcon.transform.SetParent(ReplayTable.transform);
+        heisenhouserIcon.transform.localPosition = new Vector3(-0.2847f, 0.3901f, -0.1354f);
+        heisenhouserIcon.transform.localRotation = Quaternion.Euler(51.2548f, 110.7607f, 107.2314f);
+        heisenhouserIcon.transform.localScale = Vector3.one * 0.02f;
+        
+        var srH = heisenhouserIcon.AddComponent<SpriteRenderer>();
+        var textureH = bundle2.LoadAsset<Texture2D>("HeisenhowerSprite");
+        srH.sprite = Sprite.Create(
+            textureH,
+            new Rect(0, 0, textureH.width, textureH.height),
+            new Vector3(0.5f, 0.5f),
+            100f
+        );
+
+        string[] spellings = { "Heisenhouser", "Heisenhowser", "Heisenhouwser", "Heisenhouwer" };
+        GameObject heisenhowuserText = Calls.Create.NewText(spellings[Random.Range(0, spellings.Length)], 1f, Color.white, Vector3.zero, Quaternion.identity);
+        
+        heisenhowuserText.transform.SetParent(ReplayTable.transform);
+        heisenhowuserText.name = "HeisenhouswerLogoText";
+
+        heisenhowuserText.transform.localPosition = new Vector3(-0.2891f, 0.3969f, -0.1684f);
+        heisenhowuserText.transform.localScale = Vector3.one * 0.2f;
+        heisenhowuserText.transform.localRotation = Quaternion.Euler(51.2551f, 110.4334f, 107.2313f);
         
         crystalizeButtonComp.onPressedAudioCall = loadReplayButtonComp.onPressedAudioCall;
         
@@ -676,7 +770,7 @@ public class Main : MelonMod
         
         // Playback Controls
 
-        playbackControls = GameObject.Instantiate(Calls.GameObjects.Gym.LOGIC.School.LogoSlab.NotificationSlab.SlabbuddyInfovariant.InfoForm.GetGameObject());
+        var playbackControls = GameObject.Instantiate(Calls.GameObjects.Gym.LOGIC.School.LogoSlab.NotificationSlab.SlabbuddyInfovariant.InfoForm.GetGameObject());
         playbackControls.name = "Playback Controls";
         playbackControls.transform.localScale = Vector3.one;
 
@@ -685,7 +779,7 @@ public class Main : MelonMod
         for (int i = 0; i < playbackControls.transform.GetChild(1).childCount; i++)
             GameObject.Destroy(playbackControls.transform.GetChild(1).GetChild(i).gameObject);
 
-        timeline = GameObject.Instantiate(Calls.GameObjects.Gym.LOGIC.Heinhouserproducts.Gearmarket.Itemhighlightwindow.StatusBar.GetGameObject(), 
+        var timeline = GameObject.Instantiate(Calls.GameObjects.Gym.LOGIC.Heinhouserproducts.Gearmarket.Itemhighlightwindow.StatusBar.GetGameObject(), 
             playbackControls.transform.GetChild(1));
         Material timelineMaterial = timeline.GetComponent<MeshRenderer>().material;
         timelineMaterial.SetFloat("_Has_BP_Requirement", 1f);
@@ -697,10 +791,16 @@ public class Main : MelonMod
         timeline.transform.localRotation = Quaternion.identity;
         timeline.SetActive(true);
 
-        currentDuration = Calls.Create.NewText(":3", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
-        totalDuration = Calls.Create.NewText(":3", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
-        playbackTitle = Calls.Create.NewText("Colon Three", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
-        playbackSpeedText = Calls.Create.NewText("Vewy Fast!", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
+        BoxCollider col = timeline.AddComponent<BoxCollider>();
+        col.center = timeline.GetComponent<MeshRenderer>().localBounds.center;
+        col.size = timeline.GetComponent<MeshRenderer>().localBounds.size;
+        timeline.AddComponent<TimelineScrubber>();
+        timeline.layer = LayerMask.NameToLayer("InteractionBase");
+
+        var currentDuration = Calls.Create.NewText(":3", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
+        var totalDuration = Calls.Create.NewText(":3", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
+        var playbackTitle = Calls.Create.NewText("Colon Three", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
+        var playbackSpeedText = Calls.Create.NewText("Vewy Fast!", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
         
         currentDuration.transform.SetParent(playbackControls.transform.GetChild(1));
         currentDuration.name = "Current Duration";
@@ -780,12 +880,20 @@ public class Main : MelonMod
         np1x.transform.localPosition = new Vector3(-0.4269f, -0.2493f, 0.1156f);
         np1x.transform.localRotation = Quaternion.Euler(270, 0, 0);
 
-        markerPrefab = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        var markerPrefab = GameObject.CreatePrimitive(PrimitiveType.Cube);
         markerPrefab.name = "ReplayMarker";
         markerPrefab.SetActive(false);
         
         var markerRenderer = markerPrefab.GetComponent<MeshRenderer>();
         markerRenderer.material = new Material(Shader.Find("Shader Graphs/RUMBLE_Prop"));
+
+        ReplayPlaybackControls.playbackControls = playbackControls;
+        ReplayPlaybackControls.markerPrefab = markerPrefab;
+        ReplayPlaybackControls.timeline = timeline;
+        ReplayPlaybackControls.currentDuration = currentDuration;
+        ReplayPlaybackControls.totalDuration = totalDuration;
+        ReplayPlaybackControls.playbackSpeedText = playbackSpeedText;
+        ReplayPlaybackControls.playbackTitle = playbackTitle;
         
         GameObject.DontDestroyOnLoad(ReplayTable);
         GameObject.DontDestroyOnLoad(crystalPrefab);
@@ -873,23 +981,14 @@ public class Main : MelonMod
         Structures.Clear();
         MasterIdToIndex.Clear();
         PlayerInfos.Clear();
+        StructureInfos.Clear();
         Pedestals.Clear();
-        structureRenderers.Clear();
 
         recordingSceneName = currentScene;
         
         foreach (var structure in CombatManager.instance.structures)
-        {
-            if (structure == null || !structure.TryGetComponent(out Structure _) ||
-                structure.name.StartsWith("Static Target") || structure.name.StartsWith("Moving Target"))
-                continue;
-
-            Structures.Add(structure);
-            var renderer = structure.GetComponentInChildren<MeshRenderer>();
-            var mpb = new MaterialPropertyBlock();
-            structureRenderers.Add((renderer, mpb));
-        }
-
+            TryRegisterStructure(structure);
+        
         foreach (var player in PlayerManager.instance.AllPlayers)
         {
             if (player == null) continue;
@@ -901,6 +1000,52 @@ public class Main : MelonMod
         }
 
         Pedestals.AddRange(Utilities.EnumerateMatchPedestals());
+    }
+
+    public bool TryRegisterStructure(Structure structure)
+    {
+        if (!isRecording && !isBuffering)
+            return false;
+
+        if (structure == null)
+            return false;
+
+        if (Structures.Contains(structure))
+            return false;
+        
+        if (structure.name.StartsWith("Static Target") || structure.name.StartsWith("Moving Target"))
+            return false;
+
+        Structures.Add(structure);
+
+        var name = structure.resourceName;
+        
+        StructureType type = name switch
+        {
+            "RockCube" => StructureType.Cube,
+            "Pillar" => StructureType.Pillar,
+            "Disc" => StructureType.Disc,
+            "Wall" => StructureType.Wall,
+            "Ball" => StructureType.Ball,
+            "LargeRock" => StructureType.LargeRock,
+            "SmallRock" => StructureType.SmallRock,
+            "BoulderBall" => StructureType.CagedBall,
+            _ => StructureType.Cube
+        };
+
+        if (type == StructureType.Ball &&
+            structure.transform.childCount == 3 &&
+            structure.transform.GetChild(2).name == "Ballcage")
+        {
+            type = structure.GetComponent<Tetherball>() != null ? StructureType.TetheredCagedBall : StructureType.CagedBall;
+        }
+        
+        StructureInfos.Add(new StructureInfo
+        {
+            Type = type
+        });
+
+        return true;
     }
     
     
@@ -916,40 +1061,10 @@ public class Main : MelonMod
         
         float duration = frames[^1].Time - frames[0].Time;
 
-        var validStructures = new List<StructureInfo>();
-
-        foreach (var s in Structures)
-        {
-            if (s == null) continue;
-
-            var name = s.resourceName;
-
-            StructureType type = name switch
-            {
-                "RockCube" => StructureType.Cube,
-                "Pillar" => StructureType.Pillar,
-                "Disc" => StructureType.Disc,
-                "Wall" => StructureType.Wall,
-                "Ball" => StructureType.Ball,
-                "LargeRock" => StructureType.LargeRock,
-                "SmallRock" => StructureType.SmallRock,
-                "BoulderBall" => StructureType.CagedBall,
-                _ => StructureType.Cube
-            };
-            
-            if (type == StructureType.Ball && s.transform.childCount == 3 && s.transform.GetChild(2).name == "Ballcage")
-                type = StructureType.CagedBall;
-
-            validStructures.Add(new StructureInfo
-            {
-                Type = type
-            });
-        }
-
         string customMap = Utilities.GetActiveCustomMapName();
-        string sceneName = string.IsNullOrWhiteSpace(customMap)
-            ? Utilities.GetFriendlySceneName(recordingSceneName)
-            : customMap;
+
+        if (currentScene == "Gym" && flatLandRoot?.gameObject.activeSelf == false)
+            customMap = "FlatLand";
 
         float startTime = frames[0].Time;
 
@@ -967,14 +1082,19 @@ public class Main : MelonMod
                 CustomMap = customMap,
                 FrameCount = frames.Length,
                 PedestalCount = Pedestals.Count,
+                MarkerCount = frames.Sum(f => f.Events.Count(e => e.type == EventType.Marker)),
+                AvgPing = pingCount > 0 ? pingSum / pingCount : -1,
+                MinPing = pingMin,
+                MaxPing = pingMax,
                 TargetFPS = (int)TargetRecordingFPS.SavedValue,
                 Players = PlayerInfos.ToArray(),
-                Structures = validStructures.ToArray(),
+                Structures = StructureInfos.ToArray(),
+                Guid = Guid.NewGuid().ToString()
             },
             Frames = frames
         };
         
-        string pattern = sceneName switch
+        string pattern = Utilities.GetFriendlySceneName(recordingSceneName) switch
         {
             "Gym" => ReplayFiles.LoadFormatFile("AutoNameFormats/gym"),
             "Park" => ReplayFiles.LoadFormatFile("AutoNameFormats/park"),
@@ -984,15 +1104,15 @@ public class Main : MelonMod
 
         if (string.IsNullOrWhiteSpace(pattern))
         {
-            LoggerInstance.Error($"{logPrefix} was not saved due to missing name format file.");
-            return;
+            ReplayError($"{logPrefix} was not saved due to missing name format file.");
+            pattern = "{Host} vs {Client} - {Scene}";
         }
 
         replayInfo.Header.Title = ReplaySerializer.FormatReplayString(pattern, replayInfo.Header);
         
         LoggerInstance.Msg($"{logPrefix} saved after {duration:F2}s ({frames.Length} frames)");
 
-        string path = $"{ReplayFiles.replayFolder}/{(isBufferClip ? "Clip_" : "")}{Utilities.GetReplayName(replayInfo)}";
+        string path = $"{ReplayFiles.replayFolder}/Replays/{(isBufferClip ? "Clip_" : "")}{Utilities.GetReplayName(replayInfo)}";
         ReplaySerializer.BuildReplayPackage(
             path,
             replayInfo,
@@ -1003,7 +1123,7 @@ public class Main : MelonMod
                 LoggerInstance.Msg($"{logPrefix} saved to disk: '{path}'");
                 
                 if ((bool)EnableHaptics.SavedValue)
-                    LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(0.6f, 0.15f, 0.6f, 0.15f);
+                    LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.15f, 1f, 0.15f);
 
                 ReplayFiles.ReloadReplays();
             }
@@ -1046,6 +1166,27 @@ public class Main : MelonMod
 
         GameObject replayCustomMap = null;
 
+        if (ReplayFiles.currentHeader.CustomMap == "FlatLand")
+        {
+            if (flatLandRoot?.gameObject.activeSelf == false)
+            {
+                switchingScene = false;
+            }
+            else
+            {
+                var button = flatLandRoot?.transform?.GetChild(1)?.GetChild(0)?.GetComponent<InteractionButton>();
+                if (button == null)
+                {
+                    ReplayError("Could not load FlatLand Replay. Please make sure FlatLand is installed.");
+                    return;
+                }
+                
+                button.RPC_OnPressed();
+                MelonCoroutines.Start(DelayedFlatLandLoad());
+                return;
+            }
+        }
+        
         if (switchingScene && isCustomMap)
         {
             replayCustomMap = Utilities.GetCustomMap(ReplayFiles.currentHeader.CustomMap);
@@ -1063,6 +1204,7 @@ public class Main : MelonMod
                 "Map0" => 3,
                 "Map1" => 4,
                 "Park" => 2,
+                "Gym" => 1,
                 _ => -1
             };
 
@@ -1128,6 +1270,8 @@ public class Main : MelonMod
                                     .GetGameObject()
                                     .SetActive(false);
                         }
+
+                        SimpleScreenFadeInstance.Progress = 0f;
                     })
                 );
             }
@@ -1144,6 +1288,8 @@ public class Main : MelonMod
                 MelonCoroutines.Start(DelayedParkLoad());
             
             LoadReplay(ReplayFiles.currentReplayPath);
+            
+            SimpleScreenFadeInstance.Progress = 0f;
         }
     }
     
@@ -1180,7 +1326,6 @@ public class Main : MelonMod
         }
 
         PlaybackStructures = new GameObject[currentReplay.Header.Structures.Length];
-        playbackStructureRenderers = new (MeshRenderer renderer, MaterialPropertyBlock mpb)[PlaybackStructures.Length];
         replayStructures = new GameObject("Replay Structures");
         
         for (int i = 0; i < PlaybackStructures.Length; i++)
@@ -1190,6 +1335,8 @@ public class Main : MelonMod
             
             Structure structure = PlaybackStructures[i].GetComponent<Structure>();
             structure.indistructable = true;
+            structure.onBecameFreeAudio = null;
+            structure.onBecameGroundedAudio = null;
 
             foreach (var col in structure.GetComponentsInChildren<Collider>())
                 col.enabled = false;
@@ -1201,8 +1348,9 @@ public class Main : MelonMod
             
             PlaybackStructures[i].SetActive(false);
             PlaybackStructures[i].transform.SetParent(replayStructures.transform);
-
-            playbackStructureRenderers[i] = (PlaybackStructures[i].GetComponentInChildren<MeshRenderer>(), new MaterialPropertyBlock());
+            
+            if (isRecording || isBuffering)
+                TryRegisterStructure(structure);
         }
 
         playbackStructureStates = new PlaybackStructureState[PlaybackStructures.Length];
@@ -1219,10 +1367,10 @@ public class Main : MelonMod
                 _ => true
             };
 
-            playbackStructureStates[i] = new PlaybackStructureState
-            {
-                grounded = grounded
-            };
+            playbackStructureStates[i] = new PlaybackStructureState();
+
+            if (!grounded)
+                playbackStructureStates[i].currentState = StructureStateType.Normal;
         }
         
         // ------ Players ------
@@ -1262,6 +1410,18 @@ public class Main : MelonMod
             pedestalsParent.transform.SetParent(ReplayRoot.transform);
         
             playbackPlayerStates = new PlaybackPlayerState[PlaybackPlayers.Length];
+
+            for (int i = 0; i < PlaybackPlayers.Length; i++)
+            {
+                var shiftstones = PlaybackPlayers[i].Controller.GetSubsystem<PlayerShiftstoneSystem>().GetCurrentShiftStoneConfiguration();
+                
+                playbackPlayerStates[i] = new PlaybackPlayerState
+                {
+                    playerMeasurement = PlaybackPlayers[i].Controller.assignedPlayer.Data.PlayerMeasurement,
+                    leftShiftstone = shiftstones[0],
+                    rightShiftstone = shiftstones[1]
+                };
+            }
         
             ReorderPlayers();
 
@@ -1304,16 +1464,16 @@ public class Main : MelonMod
         }
         
         // Playback Controls
-        var timelineRenderer = timeline.GetComponent<MeshRenderer>();
+        var timelineRenderer = ReplayPlaybackControls.timeline.GetComponent<MeshRenderer>();
         
         timelineRenderer.material.SetFloat("_BP_Target", currentReplay.Header.Duration * 1000f);
         timelineRenderer.material.SetFloat("_BP_Current", 0f);
 
         TimeSpan t = TimeSpan.FromSeconds(currentReplay.Header.Duration);
-        totalDuration.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
-        currentDuration.text = "0:00";
+        ReplayPlaybackControls.totalDuration.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
+        ReplayPlaybackControls.currentDuration.text = "0:00";
 
-        playbackTitle.text = currentReplay.Header.Title;
+        ReplayPlaybackControls.playbackTitle.text = currentReplay.Header.Title;
 
         var markers = currentReplay.Frames
             .SelectMany(f => f.Events
@@ -1324,7 +1484,7 @@ public class Main : MelonMod
         foreach (var marker in markers)
         {
             Vector3 position = Utilities.GetPositionOverMesh(marker.time, currentReplay.Header.Duration, timelineRenderer);
-            GameObject markerObj = GameObject.Instantiate(markerPrefab, timeline.transform);
+            GameObject markerObj = GameObject.Instantiate(ReplayPlaybackControls.markerPrefab, ReplayPlaybackControls.timeline.transform);
 
             markerObj.transform.localScale = new Vector3(0.0062f, 1.0836f, 0.0128f);
             markerObj.transform.position = position;
@@ -1345,76 +1505,52 @@ public class Main : MelonMod
     
     public void StopReplay()
     {
+        if (!isPlaying) return;
         isPlaying = false;
         
-        ClosePlaybackControls();
+        ReplayPlaybackControls.Close();
 
         foreach (var structure in PlaybackStructures)
         {
-            if (structure == null)
-                continue;
+            if (structure == null) continue;
 
             var comp = structure.GetComponent<Structure>();
             comp.indistructable = false;
-            
+
             foreach (var effect in structure.GetComponentsInChildren<VisualEffect>())
-                GameObject.Destroy(effect.gameObject);
+                GameObject.Destroy(effect);
         }
 
+        foreach (var structure in HiddenStructures)
+            structure.gameObject.SetActive(true);
+        
         if (replayStructures != null)
             GameObject.Destroy(replayStructures);
 
+        foreach (var player in PlaybackPlayers)
+            PlayerManager.instance.AllPlayers.Remove(player.Controller.assignedPlayer);
+        
         if (replayPlayers != null)
             GameObject.Destroy(replayPlayers);
 
         if (pedestalsParent != null)
         {
-            for (int i = 0; i < pedestalsParent.transform.childCount; i++)
+            for (int i = pedestalsParent.transform.childCount - 1; i >= 0; i--)
             {
                 var pedestal = pedestalsParent.transform.GetChild(i);
                 pedestal.transform.SetParent(null);
+                pedestal.gameObject.SetActive(false);
             }
-            
             GameObject.Destroy(pedestalsParent);
         }
-            
 
-        if (VFXParent != null)
-            GameObject.Destroy(VFXParent);
+        if (ReplayRoot != null)
+            GameObject.Destroy(ReplayRoot);
 
-        if (HiddenStructures != null)
-        {
-            foreach (var structure in HiddenStructures)
-            {
-                if (structure != null)
-                    structure.gameObject.SetActive(true);
-            }
-
-            HiddenStructures.Clear();
-        }
-
-        if (PlaybackPlayers != null && PlayerManager.instance != null)
-        {
-            foreach (var player in PlaybackPlayers)
-            {
-                var assigned = player?.Controller?.assignedPlayer;
-                if (assigned != null)
-                    PlayerManager.instance.AllPlayers.Remove(assigned);
-            }
-        }
-
-        CombatManager.instance?.CleanStructureList();
-
-        UpdateReplayCameraPOV(-1);
-
-        PlaybackPlayers = null;
-        PlaybackStructures = null;
         replayStructures = null;
         replayPlayers = null;
-        pedestalsParent = null;
-
-        elapsedPlaybackTime = 0f;
-        currentPlaybackFrame = 0;
+        PlaybackStructures = null;
+        PlaybackPlayers = null;
     }
 
     public void ReorderPlayers()
@@ -1490,7 +1626,7 @@ public class Main : MelonMod
         PlayerData data = new PlayerData(
             new GeneralData
             {
-                PlayFabMasterId = pInfo.MasterId,
+                PlayFabMasterId = $"{pInfo.MasterId}_{randomID}",
                 PlayFabTitleId = randomID,
                 BattlePoints = pInfo.BattlePoints,
                 PublicUsername = pInfo.Name
@@ -1564,9 +1700,38 @@ public class Main : MelonMod
     public override void OnUpdate()
     {
         HandleReplayPose();
+
+        ReplayCrystals.HandleCrystals();
         
-        if (currentScene == "Gym")
-            ReplayCrystals.HandleCrystals();
+        if (currentScene != "Gym" || replayTable?.metadataText == null)
+            return;
+
+        bool flatLandActive = flatLandRoot != null && flatLandRoot?.activeSelf == true;
+
+        if (lastFlatLandActive == flatLandActive)
+            return;
+
+        lastFlatLandActive = flatLandActive;
+        
+        replayTable.gameObject.SetActive(true);
+        replayTable.metadataText.gameObject.SetActive(true);
+
+        if (!flatLandActive)
+        {
+            replayTable.tableFloat.startPos = new Vector3(5.9641f, 1.1323f, -4.5477f);
+            replayTable.metadataTextFloat.startPos = new Vector3(5.9641f, 1.1323f, -4.5477f);
+            
+            replayTable.tableOffset = -0.4f;
+            replayTable.transform.rotation = Quaternion.Euler(270, 253.3632f, 0);
+        }
+        else
+        {
+            replayTable.tableFloat.startPos = new Vector3(5.9506f, 1.3564f, 4.1906f);
+            replayTable.metadataTextFloat.startPos = new Vector3(5.9575f, 1.8514f, 4.2102f);
+        
+            replayTable.tableOffset = 0f;
+            replayTable.transform.localRotation = Quaternion.Euler(270, 121.5819f, 0);
+        }
     }
 
     public override void OnLateUpdate()
@@ -1628,12 +1793,34 @@ public class Main : MelonMod
             Patches.activations.Clear();
             Events.Clear();
         }
+
+        if (Time.time - pingTimer >= 1f)
+        {
+            pingTimer = Time.time;
+
+            if (PhotonNetwork.LocalPlayer.CustomProperties.TryGetValue("ping", out var objPing) && PhotonNetwork.MasterClient?.CustomProperties?.TryGetValue("ping", out var objHostPing) == true)
+            {
+                int ping = objPing.Unbox<int>();
+                int hostPing = objHostPing.Unbox<int>();
+                if (ping >= 0)
+                {
+                    pingSum += ping;
+
+                    if (!PhotonNetwork.IsMasterClient)
+                        pingSum += hostPing;
+                    
+                    pingCount++;
+
+                    if (ping < pingMin) pingMin = ping;
+                    if (ping > pingMax) pingMax = ping;
+                }
+            }
+        }
     }
     
     
     Frame CaptureFrame()
     {
-        var heldStructures = new HashSet<GameObject>();
         var flickedStructures = new HashSet<GameObject>();
 
         // Players
@@ -1642,7 +1829,12 @@ public class Main : MelonMod
         for (int i = 0; i < RecordedPlayers.Count; i++)
         {
             var p = RecordedPlayers[i];
-            if (p == null) continue;
+            
+            if (p == null)
+            {
+                playerStates[i] = new PlayerState { active = false };
+                continue;
+            }
 
             var stackProc = p.Controller?.GetSubsystem<PlayerStackProcessor>();
 
@@ -1650,19 +1842,14 @@ public class Main : MelonMod
                 continue;
 
             Stack flickStack = null;
-            Stack holdStack = null;
 
             foreach (var stack in stackProc.availableStacks)
             {
                 if (stack == null)
                     continue;
-                
-                switch (stack.cachedName)
-                {
-                    case "Flick": flickStack = stack; break;
-                    case "HoldLeft":
-                    case "HoldRight": holdStack = stack; break;
-                }
+
+                if (stack.cachedName == "Flick")
+                    flickStack = stack;
 
                 if (flickStack?.runningExecutions != null)
                 {
@@ -1677,20 +1864,6 @@ public class Main : MelonMod
                             flickedStructures.Add(proc.gameObject);
                     }
                 }
-                
-                if (holdStack?.runningExecutions != null)
-                {
-                    foreach (var exec in holdStack.runningExecutions)
-                    {
-                        if (exec?.TargetProcessable == null)
-                            continue;
-                        
-                        var proc = exec.TargetProcessable.TryCast<ProcessableComponent>();
-                        
-                        if (proc?.gameObject != null)
-                            heldStructures.Add(proc.gameObject);
-                    }
-                }
             }
             
             Transform VRRig = p.Controller.transform.GetChild(2);
@@ -1702,26 +1875,35 @@ public class Main : MelonMod
             Transform chest = p.Controller.GetSubsystem<PlayerIK>().VrIK.references.chest;
 
             var charge = chest.Find("Chargestone VFX")?.GetComponent<VisualEffect>();
-            if (charge != null && charge.HasAnySystemAwake())
+            if (charge != null && charge.aliveParticleCount > 0)
                 active |= PlayerShiftstoneVFX.Charge;
 
             var adamant = chest.Find("Adamantstone_VFX")?.GetComponent<VisualEffect>();
-            if (adamant != null && adamant.HasAnySystemAwake())
+            if (adamant != null && adamant.aliveParticleCount > 0)
                 active |= PlayerShiftstoneVFX.Adamant;
 
             var surge = chest.Find("Surgestone_VFX")?.GetComponent<VisualEffect>();
-            if (surge != null && surge.HasAnySystemAwake())
+            if (surge != null && surge.aliveParticleCount > 0)
                 active |= PlayerShiftstoneVFX.Surge;
 
             var vigor = chest.Find("Vigorstone_VFX")?.GetComponent<VisualEffect>();
-            if (vigor != null && vigor.HasAnySystemAwake())
+            if (vigor != null && vigor.aliveParticleCount > 0)
                 active |= PlayerShiftstoneVFX.Vigor;
 
             var shiftstones = p.Controller.GetSubsystem<PlayerShiftstoneSystem>().GetCurrentShiftStoneConfiguration();
             int left = shiftstones is { Count: > 0 } ? shiftstones[0] : -1;
             int right = shiftstones is { Count: > 0 } ? shiftstones[1] : -1;
 
-            playerStates[i] = new PlayerState
+            bool recordFingers = (bool)HandFingerRecording.SavedValue;
+            var playerHandPresence = p.Controller.GetSubsystem<PlayerHandPresence>();
+            var LhandInput = playerHandPresence.GetHandPresenceInputForHand(InputManager.Hand.Left);
+            var RhandInput = playerHandPresence.GetHandPresenceInputForHand(InputManager.Hand.Right);
+
+            var rockCam = p.Controller.GetSubsystem<PlayerLIV>()?.LckTablet.transform.gameObject;
+
+            var measurement = p.Controller.assignedPlayer.Data.PlayerMeasurement;
+            
+            var playerState = new PlayerState
             {
                 VRRigPos = VRRig.position,
                 VRRigRot = VRRig.rotation,
@@ -1733,11 +1915,32 @@ public class Main : MelonMod
                 RHandRot = RHand.localRotation,
                 Health = p.Data.HealthPoints,
                 currentStack = Patches.activations.FirstOrDefault(s => s.playerId == p.Data.GeneralData.PlayFabMasterId).stackId,
-                active = true,
+                active = p.Controller.gameObject.activeInHierarchy,
                 activeShiftstoneVFX = active,
                 leftShiftstone = left,
-                rightShiftstone = right
+                rightShiftstone = right,
+                ArmSpan = measurement.ArmSpan,
+                Length = measurement.Length
             };
+
+            if (recordFingers)
+            {
+                playerState.lgripInput = LhandInput.gripInput;
+                playerState.lindexInput = LhandInput.indexInput;
+                playerState.lthumbInput = LhandInput.thumbInput;
+                playerState.rindexInput = RhandInput.indexInput;
+                playerState.rthumbInput = RhandInput.indexInput;
+                playerState.rgripInput = RhandInput.gripInput;
+            }
+
+            if (rockCam != null)
+            {
+                playerState.rockCamActive = rockCam.transform.GetChild(0).gameObject.activeInHierarchy;
+                playerState.rockCamPos = rockCam.transform.position;
+                playerState.rockCamRot = rockCam.transform.rotation;
+            }
+
+            playerStates[i] = playerState;
         }
 
         // Structures
@@ -1752,24 +1955,35 @@ public class Main : MelonMod
                 structure.name.StartsWith("Static Target") ||
                 structure.name.StartsWith("Moving Target"))
                 continue;
+            
+            bool hasReplayFlickVFX = structure.GetComponentsInChildren<ReplayTag>().Any(t => t.Type == "StructureFlick");
+            bool isTargetDisk = (structure.name.Contains("Disc") && structure.transform.GetChild(0).GetChild(0).gameObject.activeInHierarchy);
 
-            if (isPlaying && HiddenStructures.Contains(structure))
-                continue;
-
-            var structureRenderer = structureRenderers[i];
-            structureRenderer.renderer.GetPropertyBlock(structureRenderer.mpb);
-
-            bool isShaking = structureRenderer.mpb.GetFloat("_shake") > 0f;
+            var holdVFXCount = structure.GetComponentsInChildren<VisualEffect>().Count(vfx => vfx.name.Contains("Hold_VFX"));
+            
+            StructureStateType type = structure.processableComponent.currentState.name switch
+            {
+                "default" => StructureStateType.Default,
+                "Frozen" => StructureStateType.Frozen,
+                "Float" => StructureStateType.Float,
+                "FreeGrounded" => StructureStateType.FreeGrounded,
+                "StableGrounded" => StructureStateType.StableGrounded,
+                "Normal" => StructureStateType.Normal,
+                "Free" => StructureStateType.Free,
+                _ => StructureStateType.Default
+            };
 
             structureStates[i] = new StructureState
             {
                 position = structure.transform.position,
                 rotation = structure.transform.rotation,
-                active = structure.gameObject.activeSelf,
-                grounded = structure.IsGrounded,
-                isHeld = heldStructures.Contains(structure.gameObject),
-                isFlicked = flickedStructures.Contains(structure.gameObject),
-                isShaking = isShaking
+                active = structure.gameObject.activeInHierarchy,
+                grounded = structure.IsGrounded || (structure.activeJointControl != null && structure.processableComponent.currentState == structure.frozenState),
+                isLeftHeld = holdVFXCount >= 1,
+                isRightHeld = holdVFXCount >= 2,
+                isFlicked = flickedStructures.Contains(structure.gameObject) || hasReplayFlickVFX,
+                currentState = type,
+                isTargetDisk = isTargetDisk
             };
         }
 
@@ -1803,12 +2017,26 @@ public class Main : MelonMod
         Frames.Clear();
         Events.Clear();
         isRecording = true;
+        
+        if ((bool)EnableHaptics.SavedValue)
+            LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.15f, 1f, 0.15f);
     }
     
     public void StopRecording()
     {
+        if (ReplayRoot != null)
+        {
+            LoggerInstance.Msg("Stopped replay [StopRecording]");
+            StopReplay();
+        }
+        
         isRecording = false;
         SaveReplay(Frames.ToArray(), "Recording");
+
+        pingCount = 0;
+        pingSum = 0;
+        pingMax = 0;
+        pingMin = int.MaxValue;
     }
     
     
@@ -1869,14 +2097,18 @@ public class Main : MelonMod
 
         if (leftHand == null || rightHand == null || head == null)
         {
-            var vr = LocalPlayer?.Controller?.transform?.GetChild(2);
+            var controller = LocalPlayer?.Controller;
+            if (controller == null) return;
 
-            if (vr == null)
-                return;
+            var vr = controller.transform?.childCount >= 3 ? controller.transform.GetChild(2) : null;
+            if (vr == null || vr.childCount < 3) return;
+
+            var headParent = vr.GetChild(0);
+            if (headParent.childCount < 1) return;
 
             leftHand = vr.GetChild(1);
             rightHand = vr.GetChild(2);
-            head = vr.GetChild(0).GetChild(0);
+            head = headParent.GetChild(0);
         }
 
         bool pose = IsFramePose(leftHand, rightHand);
@@ -1911,10 +2143,10 @@ public class Main : MelonMod
                 {
                     if (isPlaying)
                     {
-                        if (playbackControlsOpen)
-                            ClosePlaybackControls();
+                        if (ReplayPlaybackControls.playbackControlsOpen)
+                            ReplayPlaybackControls.Close();
                         else
-                            OpenPlaybackControls();
+                            ReplayPlaybackControls.Open();
                     }
                     else
                     {
@@ -1957,9 +2189,9 @@ public class Main : MelonMod
             if ((bool)EnableHaptics.SavedValue)
             {
                 if (isLeft)
-                    haptics.PlayControllerHaptics(0.25f, 0.05f, 0, 0);
+                    haptics.PlayControllerHaptics(1f, 0.05f, 0, 0);
                 else
-                    haptics.PlayControllerHaptics(0, 0, 0.25f, 0.05f);
+                    haptics.PlayControllerHaptics(0, 0, 1f, 0.05f);
             }
         }
         
@@ -2018,25 +2250,31 @@ public class Main : MelonMod
         if (elapsedPlaybackTime >= currentReplay.Frames[^1].Time)
         {
             SetPlaybackTime(currentReplay.Frames[^1].Time);
-            StopReplay();
+            
+            if ((bool)StopReplayWhenDone.SavedValue)
+                StopReplay();
+            
             return;
         }
         
         if (elapsedPlaybackTime <= 0f)
         {
             SetPlaybackTime(0f);
-            StopReplay();
+
+            if ((bool)StopReplayWhenDone.SavedValue)
+                StopReplay();
+            
             return;
         }
         
         SetPlaybackTime(elapsedPlaybackTime);
 
-        timeline?.GetComponent<MeshRenderer>()?.material?.SetFloat("_BP_Current", elapsedPlaybackTime * 1000f);
+        ReplayPlaybackControls.timeline?.GetComponent<MeshRenderer>()?.material?.SetFloat("_BP_Current", elapsedPlaybackTime * 1000f);
 
-        if (currentDuration != null)
+        if (ReplayPlaybackControls.currentDuration != null)
         {
             TimeSpan t = TimeSpan.FromSeconds(elapsedPlaybackTime);
-            currentDuration.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
+            ReplayPlaybackControls.currentDuration.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
         }
     }
     
@@ -2044,14 +2282,19 @@ public class Main : MelonMod
     {
         var frames = currentReplay.Frames;
 
+        if (replayPlayers?.activeSelf == false || replayStructures?.activeSelf == false)
+            return;
+
         if ((playbackSpeed > 0 && frameIndex >= frames.Length - 1) ||
             (playbackSpeed < 0 && frameIndex <= 0))
             return;
         
         // Interpolation
-        t = playbackSpeed > 0 ? t : 1f - t;
+        t = playbackSpeed >= 0 ? t : 1f - t;
         Frame a = frames[frameIndex];
-        Frame b = frames[frameIndex + (playbackSpeed > 0 ? 1 : -1)];
+        Frame b = frames[frameIndex + (playbackSpeed >= 0 ? 1 : -1)];
+        
+        var poolManager = PoolManager.instance;
 
         // ------ Structures ------
 
@@ -2061,7 +2304,6 @@ public class Main : MelonMod
             var structureComp = playbackStructure.GetComponent<Structure>();
             var sa = a.Structures[i];
             var sb = b.Structures[i];
-            var poolManager = PoolManager.instance;
 
             ref var state = ref playbackStructureStates[i];
 
@@ -2078,47 +2320,27 @@ public class Main : MelonMod
 
             foreach (var collider in playbackStructure.GetComponentsInChildren<Collider>())
                 collider.enabled = false;
+            
+            var velocity = (sb.position - sa.position) / (b.Time - a.Time);
 
             // ------ State Event Checks ------
 
             // Structure Broke
             if (state.active && !sb.active)
             {
-                var pool = poolManager.GetPool(
-                    playbackStructure.name == "Disc"
-                        ? "DustBreakDISC_VFX"
-                        : "DustBreak_VFX"
-                );
-
-                PooledMonoBehaviour effect = GameObject.Instantiate(pool.poolItem, VFXParent.transform);
-                effect.transform.position = sa.position;
-                effect.transform.rotation = Quaternion.identity;
-                effect.GetComponent<VisualEffect>().playRate = Abs(playbackSpeed);
-                var tag = effect.gameObject.AddComponent<ReplayTag>();
-                tag.Type = "StructureBreak";
-
                 AudioManager.instance.Play(
                     playbackStructure.GetComponent<Structure>().onDeathAudio,
                     playbackStructure.transform.position
                 );
 
-                playbackStructure.GetComponent<Structure>()?.onStructureDestroyed?.Invoke();
+                try {
+                    structureComp.onStructureDestroyed?.Invoke();
+                } catch { }
             }
-
+            
             // Structure Spawned
             if (!state.active && sb.active && frameIndex != 0)
             {
-                var pool = poolManager.GetPool("DustSpawn_VFX");
-
-                var offset = playbackStructure.name is "Disc" or "Ball" ? Vector3.zero : new Vector3(0, 0.5f, 0);
-
-                PooledMonoBehaviour effect = GameObject.Instantiate(pool.poolItem, VFXParent.transform);
-                effect.transform.position = sb.position + offset;
-                effect.transform.rotation = Quaternion.identity;
-                effect.GetComponent<VisualEffect>().playRate = Abs(playbackSpeed);
-                var tag = effect.gameObject.AddComponent<ReplayTag>();
-                tag.Type = "StructureSpawn";
-
                 string sfx = playbackStructure.name switch
                 {
                     "Wall" => "Call_Structure_Spawn_Heavy",
@@ -2129,64 +2351,75 @@ public class Main : MelonMod
 
                 if (ReplayCache.SFX.TryGetValue(sfx, out var audioCall) && frameIndex + 2 < frames.Length)
                     AudioManager.instance.Play(audioCall, frames[frameIndex + 2].Structures[i].position);
-
+                
                 foreach (var visualEffect in playbackStructure.GetComponentsInChildren<PooledVisualEffect>())
                     GameObject.Destroy(visualEffect.gameObject);
             }
-
+            
             state.active = sb.active;
             playbackStructure.SetActive(state.active);
 
-            // Shaking
-            if (state.isShaking != sb.isShaking)
+            // States
+            if (state.currentState != sb.currentState)
             {
-                state.isShaking = sb.isShaking;
+                state.currentState = sb.currentState;
 
-                var pr = playbackStructureRenderers[i];
+                bool parryFromHistop = sa.currentState == StructureStateType.Frozen && sb.currentState == StructureStateType.Float;
 
-                pr.renderer.GetPropertyBlock(pr.mpb);
-
-                pr.mpb.SetFloat("_shake", sb.isShaking ? 1f : 0f);
-                pr.renderer.SetPropertyBlock(pr.mpb);
-            }
-
-            // Grounded state
-            if (state.grounded != sb.grounded && frameIndex != 0)
-            {
-                structureComp.processableComponent.SetCurrentState(
-                    sb.grounded
-                        ? structureComp.groundedState
-                        : structureComp.freeState
-                );
-
-                if (sb.grounded)
+                // Hitstop
+                bool isHitstop = state.currentState == StructureStateType.Frozen;
+                var renderer = structureComp.transform.GetChild(0).GetComponent<MeshRenderer>();
+                renderer?.material?.SetFloat("_shake", isHitstop ? 1 : 0);
+                renderer?.material?.SetFloat("_shakeFrequency", 75 * playbackSpeed);
+                
+                // Parry
+                bool isParried = state.currentState == StructureStateType.Float;
+                if (!parryFromHistop)
                 {
-                    var collider = structureComp.GetComponentInChildren<Collider>();
-                
-                    Vector3 origin = collider.bounds.center;
-                
-                    if (Physics.Raycast(origin, Vector3.down, out var hit, 5f, 768))
+                    if (isParried)
                     {
-                        var pool = poolManager.GetPool("Ground_VFX");
+                        var pool = poolManager.GetPool("Parry_VFX");
                         var effect = GameObject.Instantiate(pool.poolItem.gameObject, VFXParent.transform);
-                
-                        effect.transform.SetPositionAndRotation(
-                            hit.point,
-                            Quaternion.identity
-                        );
-                
-                        effect.transform.localScale = Vector3.one;
+
+                        effect.transform.position = sa.position;
+                        effect.transform.localRotation = Quaternion.identity;
+                        effect.transform.localScale = Vector3.one * vfxSize;
                         effect.GetComponent<VisualEffect>().playRate = Abs(playbackSpeed);
+                        effect.AddComponent<DeleteAfterSeconds>();
                         var tag = effect.AddComponent<ReplayTag>();
-                        tag.Type = "StructureGround";
+                        tag.attachedStructure = structureComp;
+                        tag.Type = "StructureParry";
+
+                        AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Parry"], sa.position);
+                    }
+                    else
+                    {
+                        var tag = VFXParent.GetComponentsInChildren<ReplayTag>().FirstOrDefault(tag => tag.Type == "StructureParry" && tag.attachedStructure == structureComp);
+                    
+                        if (tag != null)
+                            GameObject.Destroy(tag.gameObject);
                     }
                 }
             }
 
-            state.grounded = structureComp.IsGrounded;
+            if (state.grounded != sb.grounded && frameIndex != 0)
+            {
+                if (sb.grounded)
+                    structureComp.processableComponent.SetCurrentState(structureComp.groundedState);
+                else
+                    structureComp.ResetPoolable();
+            }
 
+            state.grounded = structureComp.IsGrounded;
+            
             // Hold started
-            if (!state.isHeld && sb.isHeld)
+            if (!state.isLeftHeld && sb.isLeftHeld)
+                SpawnHoldVFX("Left");
+            
+            if (!state.isRightHeld && sb.isRightHeld)
+                SpawnHoldVFX("Right");
+
+            void SpawnHoldVFX(string hand)
             {
                 var pool = poolManager.GetPool("Hold_VFX");
                 var effect = GameObject.Instantiate(pool.poolItem.gameObject, playbackStructure.transform);
@@ -2196,20 +2429,26 @@ public class Main : MelonMod
                 effect.transform.localScale = Vector3.one * vfxSize;
                 effect.GetComponent<VisualEffect>().playRate = Abs(playbackSpeed);
                 var tag = effect.AddComponent<ReplayTag>();
-                tag.Type = "StructureHold";
+                tag.Type = "StructureHold_" + hand;
 
                 AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Hold"], sa.position);
             }
 
             // Hold ended
-            if (state.isHeld && !sb.isHeld)
+            if (state.isLeftHeld && !sb.isLeftHeld)
+                DestroyHoldVFX("Left");
+
+            if (state.isRightHeld && !sb.isRightHeld)
+                DestroyHoldVFX("Right");
+
+            void DestroyHoldVFX(string hand)
             {
                 foreach (var vfx in playbackStructure.GetComponentsInChildren<ReplayTag>())
                 {
                     if (vfx == null)
                         continue;
 
-                    if (vfx.Type == "StructureHold" && vfx.transform.parent == playbackStructure.transform)
+                    if (vfx.Type == "StructureHold_" + hand && vfx.transform.parent == playbackStructure.transform)
                     {
                         GameObject.Destroy(vfx.gameObject);
                         break;
@@ -2217,7 +2456,8 @@ public class Main : MelonMod
                 }
             }
 
-            state.isHeld = Utilities.HasVFXType("StructureHold", playbackStructure.transform);
+            state.isLeftHeld = Utilities.HasVFXType("StructureHold_Left", playbackStructure.transform);
+            state.isRightHeld = Utilities.HasVFXType("StructureHold_Right", playbackStructure.transform);
 
             // Flick started
             if (!state.isFlicked && sb.isFlicked)
@@ -2254,6 +2494,8 @@ public class Main : MelonMod
             state.isFlicked = Utilities.HasVFXType("StructureFlick", playbackStructure.transform);
 
             // ------------
+            
+            structureComp.currentVelocity = velocity;
 
             if (sa.active && sb.active)
             {
@@ -2265,9 +2507,6 @@ public class Main : MelonMod
             {
                 playbackStructure.transform.SetPositionAndRotation(sb.position, sb.rotation);
             }
-
-            var velocity = (sb.position - sa.position) / (b.Time - a.Time);
-            playbackStructure.GetComponent<Structure>().currentVelocity = velocity;
             
             foreach (var vfx in playbackStructure.GetComponentsInChildren<VisualEffect>())
                 vfx.playRate = Abs(playbackSpeed);
@@ -2287,7 +2526,7 @@ public class Main : MelonMod
             {
                 playbackPlayer.Controller.GetSubsystem<PlayerHealth>().SetHealth(pb.Health, (short)state.health);
 
-                if (pb.Health < pa.Health && frameIndex != 0 && pb.Health != 0)
+                if (pb.Health < pa.Health && frameIndex != 0 && pb.Health != 0 && currentReplay.Header.Scene != "Gym")
                 {
                     var pool = PoolManager.instance.GetPool("PlayerHitmarker");
                     var effect = GameObject.Instantiate(pool.poolItem.gameObject, VFXParent.transform);
@@ -2296,6 +2535,7 @@ public class Main : MelonMod
                     effect.transform.localRotation = Quaternion.identity;
                     effect.GetComponent<VisualEffect>().playRate = Abs(playbackSpeed);
                     effect.AddComponent<ReplayTag>();
+                    effect.gameObject.AddComponent<DeleteAfterSeconds>();
 
                     var hitmarker = effect.GetComponent<PlayerHitmarker>();
                     hitmarker.SetDamage(pa.Health - pb.Health);
@@ -2314,6 +2554,8 @@ public class Main : MelonMod
                 if (pb.currentStack != (short)StackType.Flick
                     && pb.currentStack != (short)StackType.HoldLeft
                     && pb.currentStack != (short)StackType.HoldRight
+                    && pb.currentStack != (short)StackType.Ground
+                    && pb.currentStack != (short)StackType.Parry
                     && pb.currentStack != (short)StackType.None)
                 {
                     var key = ReplayCache.NameToStackType
@@ -2332,7 +2574,7 @@ public class Main : MelonMod
                             .Execute(stack);
 
                         if (pb.currentStack == (short)StackType.Dash)
-                            playbackPlayer.lastDashTime = Time.time;
+                            playbackPlayer.lastDashTime = elapsedPlaybackTime;
                     }
                 }
             }
@@ -2365,6 +2607,7 @@ public class Main : MelonMod
                     if (flags.HasFlag(flag))
                     {
                         vfx.Play();
+                        vfx.playRate = Abs(playbackSpeed);
                         AudioManager.instance.Play(ReplayCache.SFX["Call_Shiftstone_Use"], chest.transform.position);
                         var socketIndex = playbackPlayer.Controller.GetSubsystem<PlayerShiftstoneSystem>().shiftStoneSockets
                             .FirstOrDefault(s => s.assignedShifstone.name == shiftstoneName)?.assignedSocketIndex;
@@ -2385,52 +2628,86 @@ public class Main : MelonMod
                 state.leftShiftstone = pb.leftShiftstone;
                 ApplyShiftstone(playbackPlayer.Controller, 0, pb.leftShiftstone);
             }
-
+            
             if (state.rightShiftstone != pb.rightShiftstone)
             {
                 state.rightShiftstone = pb.rightShiftstone;
                 ApplyShiftstone(playbackPlayer.Controller, 1, pb.rightShiftstone);
             }
-
+            
             void ApplyShiftstone(PlayerController controller, int socketIndex, int shiftstoneIndex)
             {
                 var shiftstoneSystem = controller.GetSubsystem<PlayerShiftstoneSystem>();
-
-                var poolManager = PoolManager.instance;
-                int poolIndex = shiftstoneIndex switch
+                
+                PooledMonoBehaviour pooledObject = shiftstoneIndex switch
                 {
-                    0 => poolManager.GetPoolIndex("AdamantStone"),
-                    1 => poolManager.GetPoolIndex("ChargeStone"),
-                    2 => poolManager.GetPoolIndex("FlowStone"),
-                    3 => poolManager.GetPoolIndex("GuardStone"),
-                    4 => poolManager.GetPoolIndex("StubbornStone"),
-                    5 => poolManager.GetPoolIndex("SurgeStone"),
-                    6 => poolManager.GetPoolIndex("VigorStone"),
-                    7 => poolManager.GetPoolIndex("VolatileStone"),
-                    _ => -1
+                    0 => poolManager.GetPooledObject("AdamantStone"),
+                    1 => poolManager.GetPooledObject("ChargeStone"),
+                    2 => poolManager.GetPooledObject("FlowStone"),
+                    3 => poolManager.GetPooledObject("GuardStone"),
+                    4 => poolManager.GetPooledObject("StubbornStone"),
+                    5 => poolManager.GetPooledObject("SurgeStone"),
+                    6 => poolManager.GetPooledObject("VigorStone"),
+                    7 => poolManager.GetPooledObject("VolatileStone"),
+                    _ => null
                 };
-
-                if (poolIndex == -1)
+            
+                if (pooledObject == null)
                 {
                     shiftstoneSystem.RemoveShiftStone(socketIndex, false);
                     return;
                 }
+            
+                shiftstoneSystem.AttachShiftStone(pooledObject.GetComponent<ShiftStone>(), socketIndex, false, false);
+                AudioManager.instance.Play(ReplayCache.SFX["Call_Shiftstone_EquipBoth"], pooledObject.transform.position);
+            }
 
-                var pool = poolManager.GetPool(poolIndex);
-                if (pool == null)
-                    return;
+            var rockCam = playbackPlayer.Controller.GetSubsystem<PlayerLIV>()?.LckTablet;
+            if (rockCam != null)
+            {
+                if (state.rockCamActive != pb.rockCamActive)
+                {
+                    state.rockCamActive = pb.rockCamActive;
+                    rockCam.transform.SetParent(ReplayRoot.transform);
+                    rockCam.name = playbackPlayer.name + "_RockCam";
+                    rockCam.gameObject.SetActive(state.rockCamActive);
+                    
+                    for (int j = 0; j < rockCam.transform.childCount; j++)
+                        rockCam.transform.GetChild(j).gameObject.SetActive(state.rockCamActive);
+                }
+                
+                rockCam.transform.position = pb.rockCamPos;
+                rockCam.transform.rotation = pb.rockCamRot;
+            }
 
-                var obj = pool.FetchFromPool();
-                obj.gameObject.SetActive(true);
+            if (state.playerMeasurement.ArmSpan != pb.ArmSpan || state.playerMeasurement.Length != pb.Length)
+            {
+                var measurement = new PlayerMeasurement(pb.Length, pb.ArmSpan);
+                state.playerMeasurement = measurement;
 
-                shiftstoneSystem.AttachShiftStone(obj.GetComponent<ShiftStone>(), socketIndex, false, false);
-                AudioManager.instance.Play(ReplayCache.SFX["Call_Shiftstone_EquipBoth"], obj.transform.position);
+                playbackPlayer.Controller.GetSubsystem<PlayerScaling>().ScaleController(measurement);
+
+                AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Succes"], 
+                    playbackPlayer.Controller.GetSubsystem<PlayerIK>().VrIK.references.head.position
+                );
             }
             
             if (state.active != pb.active)
                 playbackPlayer.Controller.gameObject.SetActive(pb.active);
             
             state.active = playbackPlayer.Controller.gameObject.activeSelf;
+
+            var lHandPresence = PlayerHandPresence.HandPresenceInput.Empty;
+            lHandPresence.gripInput = pa.lgripInput;
+            lHandPresence.thumbInput = pa.lthumbInput;
+            lHandPresence.indexInput = pa.lindexInput;
+            playbackPlayer.lHandInput = lHandPresence;
+            
+            var rHandPresence = PlayerHandPresence.HandPresenceInput.Empty;
+            rHandPresence.gripInput = pa.rgripInput;
+            rHandPresence.thumbInput = pa.rthumbInput;
+            rHandPresence.indexInput = pa.rindexInput;
+            playbackPlayer.rHandInput = rHandPresence;
             
             playbackPlayer.ApplyInterpolatedPose(pa, pb, t);
 
@@ -2449,10 +2726,9 @@ public class Main : MelonMod
             ref var state = ref playbackPedestalStates[i];
 
             if (state.active != pb.active)
-            {
-                state.active = pb.active;
                 playbackPedestal.SetActive(pb.active);
-            }
+
+            state.active = playbackPedestal.activeSelf;
 
             Vector3 pos = Vector3.Lerp(pa.position, pb.position, t);
             playbackPedestal.transform.position = pos;
@@ -2470,25 +2746,34 @@ public class Main : MelonMod
         {
             switch (evt.type)
             {
-                case EventType.PlayerMeasurement:
+                case EventType.OneShotFX:
                 {
-                    var measurement = new PlayerMeasurement(evt.Length, evt.ArmSpan);
-                    var player = PlaybackPlayers[evt.playerIndex];
+                    var fx = SpawnFX(evt.fxType, evt.position, evt.rotation);
 
-                    if (player != null)
+                    if (fx != null)
                     {
-                        player.Controller.GetSubsystem<PlayerScaling>().ScaleController(measurement);
+                        GameObject closestStructure = PlaybackStructures
+                            .Where(s => Vector3.Distance(s.transform.position, evt.position) < 2f)
+                            .OrderBy(s => Vector3.Distance(s.transform.position, evt.position))
+                            .FirstOrDefault();
+                        
+                        if (closestStructure != null && evt.fxType is FXOneShotType.Spawn or FXOneShotType.Break or FXOneShotType.Grounded or FXOneShotType.Ungrounded)
+                        {
+                            float scale = closestStructure.name switch
+                            {
+                                "Ball" or "Disc" or "SmallRock" => 0.7f,
+                                "Wall" or "Cube" => 1f,
+                                "LargeRock" => 1.3f,
+                                _ => 1f
+                            };
 
-                        AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Succes"], 
-                            player.Controller.GetSubsystem<PlayerIK>().VrIK.references.head.position
-                        );
+                            fx.transform.localScale = Vector3.one * scale;
+                        }
                     }
-                    
-                    break;
-                }
 
-                case EventType.DamageHitmarker:
-                {
+                    if (evt.fxType == FXOneShotType.GroundedSFX)
+                        AudioManager.instance.Play(ReplayCache.SFX["Call_Modifier_Stomp"], evt.position);
+                    
                     break;
                 }
                 
@@ -2497,49 +2782,56 @@ public class Main : MelonMod
             }
         }
     }
-    
+
+    public GameObject SpawnFX(FXOneShotType fxType, Vector3 position, Quaternion rotation = default)
+    {
+        if (isRecording || isBuffering)
+        {
+            var evtChunk = new EventChunk
+            {
+                type = EventType.OneShotFX,
+                fxType = fxType,
+                position = position
+            };
+
+            if (fxType == FXOneShotType.Ricochet)
+                evtChunk.rotation = rotation;
+
+            Events.Add(evtChunk);
+        }
+
+        GameObject vfxObject = null;
+
+        if (ReplayCache.FXToVFXName.TryGetValue(fxType, out var poolName))
+        {
+            var effect = GameObject.Instantiate(PoolManager.instance.GetPool(poolName).poolItem);
+            if (effect != null)
+            {
+                effect.transform.SetParent(VFXParent.transform);
+                effect.transform.SetPositionAndRotation(position, rotation);
+                
+                var vfx = effect.GetComponent<VisualEffect>();
+                if (vfx != null)
+                    vfx.playRate = Abs(playbackSpeed);
+                
+                var tag = effect.gameObject.AddComponent<ReplayTag>();
+                tag.Type = poolName;
+                
+                effect.gameObject.AddComponent<DeleteAfterSeconds>();
+
+                vfxObject = effect.gameObject;
+            }
+        }
+
+        if (ReplayCache.FXToSFXName.TryGetValue(fxType, out string audioName) && ReplayCache.SFX.TryGetValue(audioName, out var audioCall))
+        {
+            AudioManager.instance.Play(audioCall, position);
+        }
+
+        return vfxObject;
+    } 
     
     // ----- Controls ------
-    
-    public void OpenPlaybackControls()
-    {
-        if (playbackControlsOpen || head == null) return;
-
-        playbackControlsOpen = true;
-        
-        Player localPlayer = LocalPlayer;
-
-        bool grounded = localPlayer.Controller.GetSubsystem<PlayerMovement>().IsGrounded();
-        
-        Vector3 position = head.position + head.forward * 0.6f - new Vector3(0, 0.1f, 0);
-
-        if (grounded)
-        {
-            // TODO
-            // Add animation
-            
-            playbackControls.transform.position = position;
-            playbackControls.SetActive(true);
-        }
-        else
-        {
-            playbackControls.transform.position = position;
-            playbackControls.SetActive(true);
-        }
-    }
-
-    public void ClosePlaybackControls()
-    {
-        if (!playbackControlsOpen) return;
-
-        playbackControlsOpen = false;
-        
-        // TODO
-        // Add animation
-        
-        playbackControls.SetActive(false);
-    }
-    
     
     public void SetPlaybackSpeed(float newSpeed)
     {
@@ -2570,10 +2862,10 @@ public class Main : MelonMod
             }
         }
 
-        if (playbackSpeedText != null)
+        if (ReplayPlaybackControls.playbackSpeedText != null)
         {
-            playbackSpeedText.text = playbackSpeed + "x";
-            playbackSpeedText.ForceMeshUpdate();
+            ReplayPlaybackControls.playbackSpeedText.text = playbackSpeed + "x";
+            ReplayPlaybackControls.playbackSpeedText.ForceMeshUpdate();
         }
     }
 
@@ -2657,10 +2949,11 @@ public class Main : MelonMod
     public struct PlaybackStructureState
     {
         public bool active;
-        public bool grounded;
-        public bool isHeld;
+        public bool isLeftHeld;
+        public bool isRightHeld;
         public bool isFlicked;
-        public bool isShaking;
+        public bool grounded;
+        public StructureStateType currentState;
     }
 
     public struct PlaybackPlayerState
@@ -2671,6 +2964,8 @@ public class Main : MelonMod
         public PlayerShiftstoneVFX activeShiftstoneVFX;
         public int leftShiftstone;
         public int rightShiftstone;
+        public bool rockCamActive;
+        public PlayerMeasurement playerMeasurement;
     }
 
     public struct PlaybackPedestalState
@@ -2688,8 +2983,11 @@ public class Clone : MonoBehaviour
     public GameObject Head;
     public PlayerController Controller;
 
+    public PlayerHandPresence.HandPresenceInput lHandInput;
+    public PlayerHandPresence.HandPresenceInput rHandInput;
+
     private static readonly int PoseFistsActiveHash = Animator.StringToHash("PoseFistsActive");
-    public float lastDashTime;
+    public float lastDashTime = -999f;
     private const float dashDuration = 1f;
 
     public PlayerAnimator pa;
@@ -2716,7 +3014,7 @@ public class Clone : MonoBehaviour
         if (!pm.IsGrounded())
             lastDashTime = -999f;
         
-        return Time.time - lastDashTime < dashDuration;
+        return Abs(Main.elapsedPlaybackTime - lastDashTime) < dashDuration;
     }
 
     public void Update()
@@ -2739,7 +3037,9 @@ public class Clone : MonoBehaviour
             state = 2;
 
         pa.animator.SetInteger(pa.movementStateAnimatorHash, state);
-        pa.animator.SetBool(PoseFistsActiveHash, ps.IsDoingAnyPose());
+        
+        if ((bool)Main.instance.CloseHandsOnPose.SavedValue)
+            pa.animator.SetBool(PoseFistsActiveHash, ps.IsDoingAnyPose());
     }
 }
 
@@ -2891,7 +3191,65 @@ public class LookAtPlayer : MonoBehaviour
 }
 
 [RegisterTypeInIl2Cpp]
+public class DeleteAfterSeconds : MonoBehaviour
+{
+    public float destroyTime = 10f;
+    private float spawnTime;
+
+    public void Awake()
+    {
+        spawnTime = Main.elapsedPlaybackTime;
+    }
+
+    public void Update()
+    {
+        if (Abs(Main.elapsedPlaybackTime - spawnTime) >= destroyTime)
+            Destroy(gameObject);
+    }
+}
+
+[RegisterTypeInIl2Cpp]
+public class TimelineScrubber : MonoBehaviour
+{
+    private void OnTriggerEnter(Collider other)
+    {
+        if (!other.gameObject.name.Contains("Bone_Pointer_C"))
+            return;
+
+        AudioManager.instance.Play(ReplayCache.SFX["Call_GearMarket_GenericButton_Press"], transform.position);
+        
+        if ((bool)Main.instance.EnableHaptics.SavedValue)
+            Main.LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(0.6f, 0.15f, 0.6f, 0.15f);
+    }
+
+    private void OnTriggerStay(Collider other)
+    {
+        if (!other.gameObject.name.Contains("Bone_Pointer_C"))
+            return;
+        
+        Vector3 point = other.ClosestPointOnBounds(transform.position);
+        float u = Utilities.GetProgressFromMeshPosition(point, ReplayPlaybackControls.timeline.GetComponent<MeshRenderer>());
+
+        float time = u * Main.currentReplay.Header.Duration;
+        
+        Main.instance.SetPlaybackTime(time);
+    }
+    
+    private void OnTriggerExit(Collider other)
+    {
+        if (!other.gameObject.name.Contains("Bone_Pointer_C"))
+            return;
+
+        AudioManager.instance.Play(ReplayCache.SFX["Call_Interactionbase_ButtonRelease"], transform.position);
+        
+        if ((bool)Main.instance.EnableHaptics.SavedValue)
+            Main.LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(0.3f, 0.15f, 0.3f, 0.15f);
+    }
+}
+
+[RegisterTypeInIl2Cpp]
 public class ReplayTag : MonoBehaviour
 {
     public string Type;
+    public Structure attachedStructure;
 }

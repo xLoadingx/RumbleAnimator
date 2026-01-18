@@ -16,6 +16,7 @@ using Il2CppRUMBLE.Environment.MatchFlow;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Players;
+using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppRUMBLE.Pools;
 using Il2CppSystem.Text;
 using Il2CppSystem.Text.RegularExpressions;
@@ -50,6 +51,66 @@ public class ReplayGlobals
             { "Explode", StackType.Explode }
         };
         
+        public static readonly Dictionary<string, FXOneShotType> AudioCallToFX = new()
+        {
+            { "Call_Structure_Impact_Light", FXOneShotType.ImpactLight },
+            { "Call_Structure_Impact_Medium", FXOneShotType.ImpactMedium },
+            { "Call_Structure_Impact_Heavy", FXOneShotType.ImpactHeavy },
+            { "Call_Structure_Impact_Massive", FXOneShotType.ImpactMassive },
+            { "Call_Structure_Ground", FXOneShotType.GroundedSFX },
+            { "Call_RockCam_Spawn", FXOneShotType.RockCamSpawn },
+            { "Call_RockCam_Despawn", FXOneShotType.RockCamDespawn },
+            { "Call_RockCam_Stick", FXOneShotType.RockCamStick },
+            { "Call_Bodyhit_Hard", FXOneShotType.Fistbump },
+            { "Call_FistBumpBonus", FXOneShotType.FistbumpGoin }
+        };
+        
+        public static readonly Dictionary<string, FXOneShotType> VFXNameToFX = new()
+        {
+            { "StructureCollision_VFX", FXOneShotType.StructureCollision },
+            { "Ricochet_VFX", FXOneShotType.Ricochet },
+            { "Ground_VFX", FXOneShotType.Grounded },
+            { "Unground_VFX", FXOneShotType.Ungrounded },
+            { "DustImpact_VFX", FXOneShotType.DustImpact },
+            { "DustSpawn_VFX", FXOneShotType.Spawn },
+            { "DustBreak_VFX", FXOneShotType.Break },
+            { "DustBreakDISC_VFX", FXOneShotType.BreakDisc },
+            { "RockCamSpawn_VFX", FXOneShotType.RockCamSpawn },
+            { "RockCamDespawn_VFX", FXOneShotType.RockCamDespawn },
+            { "PlayerBoxInteractionVFX",FXOneShotType.Fistbump },
+            { "FistbumpCoin", FXOneShotType.FistbumpGoin },
+        };
+        
+        public static readonly Dictionary<FXOneShotType, string> FXToVFXName = new()
+        {
+            { FXOneShotType.StructureCollision, "StructureCollision_VFX" },
+            { FXOneShotType.Ricochet, "Ricochet_VFX" },
+            { FXOneShotType.Grounded, "Ground_VFX" },
+            { FXOneShotType.Ungrounded, "Unground_VFX" },
+            { FXOneShotType.DustImpact, "DustImpact_VFX" },
+            { FXOneShotType.Spawn, "DustSpawn_VFX" },
+            { FXOneShotType.Break, "DustBreak_VFX" },
+            { FXOneShotType.BreakDisc, "DustBreakDISC_VFX" },
+            { FXOneShotType.RockCamSpawn, "RockCamSpawn_VFX" },
+            { FXOneShotType.RockCamDespawn, "RockCamDespawn_VFX" },
+            { FXOneShotType.Fistbump, "PlayerBoxInteractionVFX" },
+            { FXOneShotType.FistbumpGoin, "FistbumpCoin" }
+        };
+
+        public static readonly Dictionary<FXOneShotType, string> FXToSFXName = new()
+        {
+            { FXOneShotType.ImpactLight, "Call_Structure_Impact_Light" },
+            { FXOneShotType.ImpactMedium, "Call_Structure_Impact_Medium" },
+            { FXOneShotType.ImpactHeavy, "Call_Structure_Impact_Heavy" },
+            { FXOneShotType.ImpactMassive, "Call_Structure_Impact_Massive" },
+            { FXOneShotType.GroundedSFX, "Call_Structure_Ground" },
+            { FXOneShotType.RockCamSpawn, "Call_RockCam_Spawn" },
+            { FXOneShotType.RockCamDespawn, "Call_RockCam_Despawn" },
+            { FXOneShotType.RockCamStick, "Call_RockCam_Stick" },
+            { FXOneShotType.Fistbump, "Call_Bodyhit_Hard" },
+            { FXOneShotType.FistbumpGoin, "Call_FistBumpBonus" }
+        };
+        
         public static Dictionary<StructureType, Pool<PooledMonoBehaviour>> structurePools;
         public static Dictionary<string, AudioCall> SFX;
         
@@ -70,7 +131,10 @@ public class ReplayGlobals
                 else if (name == "Ball") structurePools[StructureType.Ball] = pool;
                 else if (name.Contains("LargeRock")) structurePools[StructureType.LargeRock] = pool;
                 else if (name.Contains("SmallRock")) structurePools[StructureType.SmallRock] = pool;
-                else if (name.Contains("BoulderBall")) structurePools[StructureType.CagedBall] = pool;
+                else if (name.Contains("BoulderBall")) {
+                    structurePools[StructureType.CagedBall] = pool;
+                    structurePools[StructureType.TetheredCagedBall] = pool;
+                }
             }
             
             AudioCall[] audioCalls = Resources.FindObjectsOfTypeAll<AudioCall>();
@@ -159,11 +223,13 @@ public class ReplayGlobals
 
             s = sb.ToString();
 
-            foreach (var c in Path.GetInvalidPathChars())
+            foreach (var c in Path.GetInvalidFileNameChars())
                 s = s.Replace(c.ToString(), "");
 
             s = Regex.Replace(s, @"\s+", " ").Trim();
 
+            s = s.Replace("\\", "_").Replace("/", "_");
+            
             return string.IsNullOrEmpty(s) ? "Unknown" : s;
         }
         
@@ -173,7 +239,7 @@ public class ReplayGlobals
         public static string GetReplayName(ReplayInfo replayInfo)
         {
             string sceneName = GetFriendlySceneName(replayInfo.Header.Scene);
-            string customMapName = GetActiveCustomMapName();
+            string customMapName = replayInfo.Header.CustomMap;
             
             var localPlayer = PlayerManager.instance.localPlayer;
             string localPlayerName = CleanName(localPlayer.Data.GeneralData.PublicUsername);
@@ -183,18 +249,19 @@ public class ReplayGlobals
                 ? CleanName(opponent)
                 : "Unknown";
 
-            string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+            DateTime.TryParse(replayInfo.Header.Date, out var dateTime);
+            string timestamp = dateTime.ToString("yyyy-MM-dd_hh-mm-ss");
             
-            string matchFormat = $"{localPlayerName}-vs-{opponentName}_on_{sceneName}_{timestamp}.replay";
+            string matchFormat = $"Replay_{localPlayerName}-vs-{opponentName}_on_{sceneName}_{timestamp}.replay";
             
             if (!string.IsNullOrEmpty(customMapName))
-                return $"{localPlayerName}-vs-{opponentName}_on_{customMapName}_{timestamp}.replay";
+                return $"Replay_{localPlayerName}-vs-{opponentName}_on_{customMapName}_{timestamp}.replay";
 
             return sceneName switch
             {
                 "Ring" or "Pit" => matchFormat,
-                "Park" => $"Replay_{timestamp}_{sceneName}_{replayInfo.Header.Players.Length}P_{localPlayerName}.replay",
-                _ => $"Replay_{timestamp}_{sceneName}_{localPlayerName}.replay"
+                "Park" => $"Replay_{sceneName}_{replayInfo.Header.Players.Length}P_{localPlayerName}_{timestamp}.replay",
+                _ => $"Replay_{sceneName}_{localPlayerName}_{timestamp}.replay"
             };
         }
         
@@ -245,12 +312,29 @@ public class ReplayGlobals
         {
             float u = Clamp01(a / b);
 
-            Bounds bound = renderer.bounds;
+            Bounds localBounds = renderer.localBounds;
 
-            Vector3 pos = renderer.transform.position;
-            pos.x = Lerp(bound.max.x, bound.min.x, u);
+            float localX = Lerp(localBounds.min.x, localBounds.max.x, u);
 
-            return pos;
+            Vector3 localPos = localBounds.center;
+            localPos.x = localX;
+            return renderer.transform.TransformPoint(localPos);
+        }
+
+        public static float GetProgressFromMeshPosition(Vector3 worldPos, MeshRenderer renderer)
+        {
+            Vector3 localPos = renderer.transform.InverseTransformPoint(worldPos);
+
+            Bounds localBounds = renderer.localBounds;
+
+            float minX = localBounds.min.x;
+            float maxX = localBounds.max.x;
+
+            if (Approximately(maxX, minX))
+                return 0f;
+
+            float u = InverseLerp(minX, maxX, localPos.x);
+            return Clamp01(u);
         }
 
         // ----- Lerping -----
@@ -319,7 +403,7 @@ public class ReplayGlobals
 
     public static class ReplayFiles
     {
-        public static string replayFolder = $"{MelonEnvironment.UserDataDirectory}/MatchReplays";
+        public static string replayFolder = $"{MelonEnvironment.UserDataDirectory}/RumblePlayback";
         
         public static List<string> replayPaths = new();
         public static int currentIndex = -1;
@@ -328,20 +412,19 @@ public class ReplayGlobals
         public static bool metadataHidden = false;
         
         public static FileSystemWatcher replayWatcher;
+        public static FileSystemWatcher metadataFormatWatcher;
         public static bool reloadQueued;
         public static bool suppressWatcher;
 
         public static string currentReplayPath = null;
         public static ReplaySerializer.ReplayHeader currentHeader = null;
 
-        private static Dictionary<string, ReplaySerializer.ReplayHeader> manifestCache = new();
-
         
         // ----- Init -----
         
         public static void Init()
         {
-            Directory.CreateDirectory(replayFolder);
+            Directory.CreateDirectory(Path.Combine(replayFolder, "Replays"));
             
             Task.Run(() =>
             {
@@ -357,15 +440,15 @@ public class ReplayGlobals
         {
             void WriteIfNotExists(string filePath, string contents)
             {
-                string path = Path.Combine(replayFolder, filePath);
+                string path = Path.Combine(replayFolder, "Settings", filePath);
                 if (!File.Exists(path))
                     File.WriteAllText(path, contents);
             }
 
-            string metadataFormatsFolder = Path.Combine(replayFolder, "MetadataFormats");
+            string metadataFormatsFolder = Path.Combine(replayFolder, "Settings", "MetadataFormats");
             Directory.CreateDirectory(metadataFormatsFolder);
             
-            string autoNameFormatsFolder = Path.Combine(replayFolder, "AutoNameFormats");
+            string autoNameFormatsFolder = Path.Combine(replayFolder, "Settings", "AutoNameFormats");
             Directory.CreateDirectory(autoNameFormatsFolder);
             
             const string TagHelpText =
@@ -379,8 +462,12 @@ public class ReplayGlobals
                 "{DateTime}\n" +
                 "{PlayerCount} - e.g. '1 player', '3 players'\n" +
                 "{PlayerList} - Can specify how many player names are shown\n" +
+                "{AveragePing}\n" +
+                "{MinimumPing} - The lowest ping in the recording\n" +
+                "{MaximumPing} - The highest ping in the recording\n" +
                 "{Version}\n" +
                 "{StructureCount}\n" +
+                "{MarkerCount}\n" +
                 "{Duration}\n" +
                 "{FPS} - Target FPS of the recording\n" +
                 "\n" +
@@ -388,9 +475,9 @@ public class ReplayGlobals
                 "Example: {PlayerList:3}, {DateTime:yyyyMMdd}\n\n" +
                 "###\n";
             
-            WriteIfNotExists("MetadataFormats/metadata_gym.txt", TagHelpText + "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\nDuration: {Duration}\n\n{StructureCount}");
-            WriteIfNotExists("MetadataFormats/metadata_park.txt", TagHelpText + "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\nHost: {Host}\n{PlayerList:3}\nDuration: {Duration}\n\n{StructureCount}");
-            WriteIfNotExists("MetadataFormats/metadata_match.txt", TagHelpText + "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\nHost: {Host}\nDuration: {Duration}\n\n{StructureCount}");
+            WriteIfNotExists("MetadataFormats/metadata_gym.txt", TagHelpText + "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\nDuration: {Duration}");
+            WriteIfNotExists("MetadataFormats/metadata_park.txt", TagHelpText + "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\n-----------\nHost: {Host}\nPing: {AveragePing} ms ({MinimumPing}-{MaximumPing})\n\n{PlayerList:3}\nDuration: {Duration}");
+            WriteIfNotExists("MetadataFormats/metadata_match.txt", TagHelpText + "{Title}\n{DateTime:yyyy-MM-dd HH:mm:ss}\nVersion {Version}\n\n{Scene}\n-----------\nHost: {Host}\nPing: {AveragePing} ms ({MinimumPing}-{MaximumPing})\nDuration: {Duration}");
             
             WriteIfNotExists("AutoNameFormats/gym.txt", TagHelpText + "{LocalPlayer} - {Scene}");
             WriteIfNotExists("AutoNameFormats/park.txt", TagHelpText + "{Host} - {Scene}\n");
@@ -402,7 +489,7 @@ public class ReplayGlobals
 
         public static string LoadFormatFile(string path)
         {
-            string fullPath = Path.Combine(replayFolder, path + ".txt");
+            string fullPath = Path.Combine(replayFolder, "Settings", path + ".txt");
             if (!File.Exists(fullPath)) return null;
             
             var lines = File.ReadAllLines(fullPath);
@@ -429,14 +516,10 @@ public class ReplayGlobals
         }
         
 
-        public static ReplaySerializer.ReplayHeader GetCachedManifest(string path)
+        public static ReplaySerializer.ReplayHeader GetManifest(string path)
         {
-            if (!manifestCache.TryGetValue(path, out var header))
-            {
-                header = ReplaySerializer.GetManifest(path);
-                manifestCache[path] = header;
-            }
-
+            var header = ReplaySerializer.GetManifest(path);
+            
             if (string.IsNullOrEmpty(header.Title))
             {
                 string scene = header.Scene;
@@ -460,7 +543,7 @@ public class ReplayGlobals
         
         static void StartWatchingReplays()
         {
-            replayWatcher = new FileSystemWatcher(replayFolder, "*.replay");
+            replayWatcher = new FileSystemWatcher(Path.Combine(replayFolder, "Replays"), "*.replay");
 
             replayWatcher.NotifyFilter =
                 NotifyFilters.FileName |
@@ -472,6 +555,12 @@ public class ReplayGlobals
             replayWatcher.Renamed += OnReplayFolderChanged;
             
             replayWatcher.EnableRaisingEvents = true;
+
+            metadataFormatWatcher = new FileSystemWatcher(Path.Combine(replayFolder, "Settings", "MetadataFormats"), "*.txt");
+
+            metadataFormatWatcher.NotifyFilter = NotifyFilters.LastWrite;
+            metadataFormatWatcher.Changed += OnFormatChanged;
+            metadataFormatWatcher.EnableRaisingEvents = true;
         }
 
         static void OnReplayFolderChanged(object sender, FileSystemEventArgs e)
@@ -488,6 +577,16 @@ public class ReplayGlobals
             
             reloadQueued = true;
             MelonCoroutines.Start(ReloadNextFrame());
+        }
+
+        static void OnFormatChanged(object sender, FileSystemEventArgs e)
+        {
+            if (string.IsNullOrEmpty(currentReplayPath) || currentHeader == null)
+                return;
+
+            var format = GetMetadataFormat(currentHeader.Scene);
+            table.metadataText.text = ReplaySerializer.FormatReplayString(format, currentHeader);
+            table.metadataText.ForceMeshUpdate();
         }
         
 
@@ -594,11 +693,10 @@ public class ReplayGlobals
 
                 try
                 {
-                    var header = GetCachedManifest(currentReplayPath);
+                    var header = GetManifest(currentReplayPath);
                     currentHeader = header;
-                    table.replayNameText.text = string.IsNullOrWhiteSpace(header.Title)
-                        ? Path.GetFileNameWithoutExtension(currentReplayPath)
-                        : header.Title;
+                    string filename = Path.GetFileNameWithoutExtension(currentReplayPath);
+                    table.replayNameText.text = filename?.StartsWith("Replay") == true ? currentHeader.Title : filename;
 
                     var format = GetMetadataFormat(header.Scene);
                     table.metadataText.text = ReplaySerializer.FormatReplayString(format, header);
@@ -619,9 +717,9 @@ public class ReplayGlobals
             table.replayNameText.ForceMeshUpdate();
             table.indexText.ForceMeshUpdate();
             table.metadataText.ForceMeshUpdate();
-            ApplyTMPSettings(table.replayNameText, 5f, 0.51f);
-            ApplyTMPSettings(table.indexText, 5f, 0.51f);
-            ApplyTMPSettings(table.metadataText, 15f, 2f);
+            ApplyTMPSettings(table.replayNameText, 5f, 0.51f, true);
+            ApplyTMPSettings(table.indexText, 5f, 0.51f, false);
+            ApplyTMPSettings(table.metadataText, 15f, 2f, true);
             table.metadataText.enableAutoSizing = true;
         }
 
@@ -651,7 +749,7 @@ public class ReplayGlobals
         public static void LoadReplays()
         {
             replayPaths = Directory
-                .GetFiles(replayFolder, "*.replay", SearchOption.AllDirectories)
+                .GetFiles(Path.Combine(replayFolder, "Replays"), "*.replay", SearchOption.AllDirectories)
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .ToList();
 
@@ -666,7 +764,11 @@ public class ReplayGlobals
 
             if (!string.IsNullOrEmpty(currentReplayPath))
             {
-                int newIndex = replayPaths.IndexOf(currentReplayPath);
+                int newIndex = replayPaths.FindIndex(p =>
+                {
+                    var header = ReplaySerializer.GetManifest(p);
+                    return header.Guid == currentHeader?.Guid;
+                });
                 currentIndex = newIndex >= 0 ? newIndex : -1;
             }
             else
@@ -678,7 +780,7 @@ public class ReplayGlobals
         }
         
 
-        static void ApplyTMPSettings(TextMeshPro text, float horizontal, float vertical)
+        static void ApplyTMPSettings(TextMeshPro text, float horizontal, float vertical, bool apply)
         {
             if (text == null) return;
             
@@ -687,10 +789,73 @@ public class ReplayGlobals
             rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, horizontal);
             rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, vertical);
 
-            text.fontSizeMin = 0.1f;
-            text.fontSizeMax = 10f;
-            text.enableWordWrapping = true;
-            text.overflowMode = TextOverflowModes.Overflow;
+            if (apply)
+            {
+                text.fontSizeMin = 0.1f;
+                text.fontSizeMax = 7f;
+                text.enableWordWrapping = true;
+                text.overflowMode = TextOverflowModes.Overflow;
+                text.enableAutoSizing = true;
+                text.autoSizeTextContainer = true;
+            }
+        }
+    }
+
+    public static class ReplayPlaybackControls
+    {
+        public static bool playbackControlsOpen;
+    
+        public static GameObject playbackControls;
+        public static GameObject timeline;
+        public static TextMeshPro totalDuration;
+        public static TextMeshPro currentDuration;
+        public static TextMeshPro playbackTitle;
+        public static TextMeshPro playbackSpeedText;
+    
+        public static GameObject markerPrefab;
+        
+        public static void Open()
+        {
+            if (playbackControlsOpen || Main.instance.head == null) return;
+
+            playbackControlsOpen = true;
+        
+            bool grounded = Main.LocalPlayer.Controller.GetSubsystem<PlayerMovement>().IsGrounded();
+        
+            Vector3 position = Main.instance.head.position + Main.instance.head.forward * 0.6f - new Vector3(0, 0.1f, 0);
+
+            Vector3 lookDir = Main.instance.head.position - position;
+            lookDir.y = 0f;
+
+            Quaternion rotation = Quaternion.LookRotation(lookDir);
+        
+            if (grounded)
+            {
+                // TODO
+                // Add animation
+            
+                playbackControls.transform.position = position;
+                playbackControls.transform.rotation = rotation;
+                playbackControls.SetActive(true);
+            }
+            else
+            {
+                playbackControls.transform.position = position;
+                playbackControls.transform.rotation = rotation;
+                playbackControls.SetActive(true);
+            }
+        }
+
+        public static void Close()
+        {
+            if (!playbackControlsOpen) return;
+
+            playbackControlsOpen = false;
+        
+            // TODO
+            // Add animation
+        
+            playbackControls.SetActive(false);
         }
     }
 
@@ -753,23 +918,25 @@ public class ReplayGlobals
         }
         
         
-        public static void LoadCrystals(string scene)
+        public static void LoadCrystals(string scene = null)
         {
+            if (string.IsNullOrEmpty(scene))
+                scene = Main.instance.currentScene;
+            
             string path = Path.Combine(
                 MelonEnvironment.UserDataDirectory,
-                "MatchReplays",
+                "RumblePlayback",
+                "Settings",
                 "replayCrystals.json"
             );
 
-            CrystalState[] states = null;
+            if (!File.Exists(path))
+                return;
 
-            if (File.Exists(path))
-            {
-                string json = File.ReadAllText(path);
-                states = JsonConvert.DeserializeObject<CrystalState[]>(json);
-            }
+            string json = File.ReadAllText(path);
+            var allStates = JsonConvert.DeserializeObject<Dictionary<string, CrystalState[]>>(json);
 
-            if (states != null)
+            if (allStates != null && allStates.TryGetValue(scene, out var states))
             {
                 Crystals = new();
 
@@ -778,35 +945,41 @@ public class ReplayGlobals
             }
         }
 
-        public static void SaveCrystals()
+        public static void SaveCrystals(string scene = null)
         {
-            if (Crystals == null)
-                return;
+            if (string.IsNullOrEmpty(scene))
+                scene = Main.instance.currentScene;
             
-            var states = new CrystalState[Crystals.Count];
-
-            for (int i = 0; i < Crystals.Count; i++)
-            {
-                var crystal = Crystals[i];
-                if (crystal == null)
-                    continue;
-                
-                states[i] = crystal.CaptureState();
-            }
-
-            string json = JsonConvert.SerializeObject(
-                states,
-                Formatting.Indented
-            );
-
             string path = Path.Combine(
                 MelonEnvironment.UserDataDirectory,
-                "MatchReplays",
+                "RumblePlayback",
+                "Settings",
                 "replayCrystals.json"
             );
+
+            Dictionary<string, CrystalState[]> allStates = new();
+
+            if (File.Exists(path))
+            {
+                string existingJson = File.ReadAllText(path);
+                allStates = JsonConvert.DeserializeObject<Dictionary<string, CrystalState[]>>(existingJson)
+                    ?? new();
+            }
+
+            if (Crystals == null)
+                return;
+
+            var states = new List<CrystalState>();
+            foreach (var crystal in Crystals)
+            {
+                if (crystal != null)
+                    states.Add(crystal.CaptureState());
+            }
+
+            allStates[scene] = states.ToArray();
             
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
-            File.WriteAllText(path, json);
+            string newJson = JsonConvert.SerializeObject(allStates, Formatting.Indented);
+            File.WriteAllText(path, newJson);
         }
         
 
@@ -1310,7 +1483,7 @@ public class ReplayGlobals
         private static PunVoiceClient voice;
         
         private static readonly Dictionary<(int playerId, int voiceId), VoiceStreamWriter> writers = new();
-        public static string tempVoiceDir = Path.Combine(MelonEnvironment.UserDataDirectory, "MatchReplays", "TempVoices");
+        public static string tempVoiceDir = Path.Combine(MelonEnvironment.UserDataDirectory, "RumblePlayback", "TempVoices");
         
         public static List<VoiceTrackInfo> voiceTrackInfos = new();
 

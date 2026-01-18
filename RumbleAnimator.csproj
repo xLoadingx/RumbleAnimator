@@ -6,19 +6,13 @@
         <Nullable>disable</Nullable>
     </PropertyGroup>
 
+    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+      <DebugSymbols>true</DebugSymbols>
+      <DebugType>embedded</DebugType> 
+    </PropertyGroup>
+
     <ItemGroup>
-    <Reference Include="..\..\SteamLibrary\steamapps\common\RUMBLE\MelonLoader\**\*.dll" Private="false" />
-    <Reference Include="ModUI">
-      <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\ModUI.dll</HintPath>
-    </Reference>
-
-    <Reference Include="RumbleModdingAPI">
-      <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\rumblemoddingapi.dll</HintPath>
-    </Reference>
-
-    <Reference Include="RumbleModUIPlus">
-      <HintPath>..\..\SteamLibrary\steamapps\common\RUMBLE\Mods\RumbleModUIPlus.dll</HintPath>
-    </Reference>
+      <Reference Include=".ref/*.dll" Private="false" />
     </ItemGroup>
   
     <ItemGroup>
@@ -28,20 +22,10 @@
   
     <ItemGroup>
       <None Remove="src\replaytable" />
-    </ItemGroup>
-  
-    <ItemGroup>
       <None Remove="src\replayobjects" />
-    </ItemGroup>
-  
-    <ItemGroup>
-      <EmbeddedResource Include="src\replayobjects" />
       <None Remove="src\replayobjects2" />
+      <EmbeddedResource Include="src\replayobjects" />
       <EmbeddedResource Include="src\replayobjects2" />
     </ItemGroup>
-
-    <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-      <Exec Command="xcopy /Y /R &quot;$(TargetPath)&quot; &quot;E:\SteamLibrary\steamapps\common\RUMBLE\Mods\&quot;&#xA;" />
-    </Target>
 
 </Project>

@@ -1,0 +1,38 @@
+name: Build RumbleAnimator
+on:
+  workflow_call:
+    inputs:
+      configuration:
+        description: "Build configuration"
+        default: "Debug"
+        type: string
+
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: "Build configuration"
+        default: "Debug"
+        type: choice
+        options:
+          - Release
+          - Debug
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "6.0.x"
+      - name: Setup References
+        run: dotnet restore & curl -o 'ref.tar.gz' ${{ secrets.REFERENCESDOWNLOADURL }}
+      - run: |
+          tar -xzf ref.tar.gz
+          mv ref .ref # the file server hosting the references wont include dotfiles 3:
+      - name: Build RumbleAnimator
+        run: dotnet build --configuration ${{ inputs.configuration }} --output .build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RumbleAnimator-${{ inputs.configuration }}
+          path: .build/RumbleAnimator.dll
+          if-no-files-found: error

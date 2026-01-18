@@ -11,6 +11,7 @@ using UnityEngine;
 using System.Threading.Tasks;
 using Il2CppPhoton.Pun;
 using Il2CppRUMBLE.Players;
+using Il2CppRUMBLE.Players.Subsystems;
 using MelonLoader;
 using Utilities = RumbleAnimator.ReplayGlobals.Utilities;
 using ReplayFiles = RumbleAnimator.ReplayGlobals.ReplayFiles;
@@ -32,10 +33,31 @@ public static class BinaryExtensions
 
     public static void Write(this BinaryWriter bw, Quaternion q)
     {
-        bw.Write(q.x);
-        bw.Write(q.y);
-        bw.Write(q.z);
-        bw.Write(q.w);
+        // Smallest-three quaternion compression algorithm
+        
+        int maxIndex = 0;
+        float maxValue = Math.Abs(q[0]);
+
+        for (int i = 1; i < 4; i++)
+        {
+            float abs = Math.Abs(q[i]);
+            if (abs > maxValue)
+            {
+                maxIndex = i;
+                maxValue = abs;
+            }
+        }
+
+        float sign = q[maxIndex] < 0 ? -1f : 1f;
+
+        for (int i = 0; i < 4; i++)
+        {
+            if (i == maxIndex) continue;
+            ushort quantized = (ushort)(Mathf.Clamp01(q[i] * sign * 0.5f + 0.5f) * ushort.MaxValue);
+            bw.Write(quantized);
+        }
+
+        bw.Write((byte)maxIndex);
     }
 
     public static Vector3 ReadVector3(this BinaryReader br)
@@ -49,12 +71,36 @@ public static class BinaryExtensions
 
     public static Quaternion ReadQuaternion(this BinaryReader br)
     {
-        return new Quaternion(
-            br.ReadSingle(),
-            br.ReadSingle(),
-            br.ReadSingle(),
-            br.ReadSingle()
-        );
+        float[] components = new float[4];
+
+        ushort a = br.ReadUInt16();
+        ushort b = br.ReadUInt16();
+        ushort c = br.ReadUInt16();
+        byte droppedIndex = br.ReadByte();
+        
+        float[] smalls =
+        {
+            (a / (float)ushort.MaxValue - 0.5f) * 2f,
+            (b / (float)ushort.MaxValue - 0.5f) * 2f,
+            (c / (float)ushort.MaxValue - 0.5f) * 2f,
+        };
+
+        int s = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            if (i == droppedIndex) continue;
+            components[i] = smalls[s++];
+        }
+        
+        float sumSquares = 0f;
+        for (int i = 0; i < 4; i++)
+        {
+            if (i == droppedIndex) continue;
+            sumSquares += components[i] * components[i];
+        }
+        components[droppedIndex] = Mathf.Sqrt(1f - sumSquares);
+
+        return new Quaternion(components[0], components[1], components[2], components[3]);
     }
 
     public static void Write<TField>(this BinaryWriter bw, TField field, Vector3 v) where TField : Enum
@@ -67,7 +113,7 @@ public static class BinaryExtensions
     public static void Write<TField>(this BinaryWriter bw, TField field, Quaternion q) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)16);
+        bw.Write((byte)7);
         bw.Write(q);
     }
     
@@ -105,7 +151,7 @@ public static class BinaryExtensions
 public class ReplaySerializer
 {
     public static string FileName { get; set; }
-    
+
     const float EPS = 0.00005f;
     const float ROT_EPS_ANGLE = 0.05f;
 
@@ -117,32 +163,42 @@ public class ReplaySerializer
         public string Version;
         public string Scene;
         public string Date;
-        
+
         public float Duration;
 
         public int FrameCount;
         public int PedestalCount;
+        public int MarkerCount;
+        public int AvgPing;
+        public int MaxPing;
+        public int MinPing;
         public int TargetFPS;
 
         public PlayerInfo[] Players;
         public StructureInfo[] Structures;
+
+        public string Guid;
     }
-    
-    
+
+
     // ----- Helpers -----
-    
+
     static bool PosChanged(Vector3 a, Vector3 b)
     {
         return (a - b).sqrMagnitude > EPS * EPS;
     }
-    
+
     static bool RotChanged(Quaternion a, Quaternion b)
     {
         return Quaternion.Angle(a, b) > ROT_EPS_ANGLE;
     }
-    
-    
-    // ----- Field-based diffs -----
+
+    static bool FloatChanged(float a, float b)
+    {
+        return Mathf.Abs(a - b) < EPS;
+    }
+
+// ----- Field-based diffs -----
     
     static bool WriteIf(bool condition, Action write)
     {
@@ -172,15 +228,20 @@ public class ReplaySerializer
             prev.active != curr.active,
             () => w.Write(StructureField.active, curr.active)
         );
-
+        
         any |= WriteIf(
             prev.grounded != curr.grounded,
             () => w.Write(StructureField.grounded, curr.grounded)
         );
 
         any |= WriteIf(
-            prev.isHeld != curr.isHeld,
-            () => w.Write(StructureField.isHeld, curr.isHeld)
+            prev.isLeftHeld != curr.isLeftHeld,
+            () => w.Write(StructureField.isLeftHeld, curr.isLeftHeld)
+        );
+        
+        any |= WriteIf(
+            prev.isRightHeld != curr.isRightHeld,
+            () => w.Write(StructureField.isRightHeld, curr.isRightHeld)
         );
 
         any |= WriteIf(
@@ -189,8 +250,13 @@ public class ReplaySerializer
         );
 
         any |= WriteIf(
-            prev.isShaking != curr.isShaking,
-            () => w.Write(StructureField.isShaking, curr.isShaking)
+            prev.currentState != curr.currentState,
+            () => w.Write(StructureField.currentState, (byte)curr.currentState)
+        );
+        
+        any |= WriteIf(
+            prev.isTargetDisk != curr.isTargetDisk,
+            () => w.Write(StructureField.isTargetDisk, curr.isTargetDisk)
         );
 
         return any;
@@ -270,6 +336,61 @@ public class ReplaySerializer
             () => w.Write(PlayerField.rightShiftstone, (byte)curr.rightShiftstone)
         );
 
+        any |= WriteIf(
+            FloatChanged(prev.lgripInput, curr.lgripInput),
+            () => w.Write(PlayerField.lgripInput, curr.lgripInput)
+        );
+        
+        any |= WriteIf(
+            FloatChanged(prev.lthumbInput, curr.lthumbInput),
+            () => w.Write(PlayerField.lthumbInput, curr.lthumbInput)
+        );
+        
+        any |= WriteIf(
+            FloatChanged(prev.lindexInput, curr.lindexInput),
+            () => w.Write(PlayerField.lindexInput, curr.lindexInput)
+        );
+        
+        any |= WriteIf(
+            FloatChanged(prev.rgripInput, curr.rgripInput),
+            () => w.Write(PlayerField.rgripInput, curr.rgripInput)
+        );
+        
+        any |= WriteIf(
+            FloatChanged(prev.rthumbInput, curr.rthumbInput),
+            () => w.Write(PlayerField.rthumbInput, curr.rthumbInput)
+        );
+        
+        any |= WriteIf(
+            FloatChanged(prev.rindexInput, curr.rindexInput),
+            () => w.Write(PlayerField.rindexInput, curr.rindexInput)
+        );
+
+        any |= WriteIf(
+            prev.rockCamActive != curr.rockCamActive,
+            () => w.Write(PlayerField.rockCamActive, curr.rockCamActive)
+        );
+
+        any |= WriteIf(
+            PosChanged(prev.rockCamPos, curr.rockCamPos),
+            () => w.Write(PlayerField.rockCamPos, curr.rockCamPos)
+        );
+
+        any |= WriteIf(
+            RotChanged(prev.rockCamRot, curr.rockCamRot),
+            () => w.Write(PlayerField.rockCamRot, curr.rockCamRot)
+        );
+        
+        any |= WriteIf(
+            FloatChanged(prev.ArmSpan, curr.ArmSpan),
+            () => w.Write(PlayerField.armSpan, curr.ArmSpan)
+        );
+        
+        any |= WriteIf(
+            FloatChanged(prev.Length, curr.Length),
+            () => w.Write(PlayerField.length, curr.Length)
+        );
+
         return any;
     }
 
@@ -320,16 +441,6 @@ public class ReplaySerializer
         );
 
         any |= WriteIf(
-            e.Length > 0,
-            () => w.Write(EventField.length, e.Length)
-        );
-        
-        any |= WriteIf(
-            e.ArmSpan > 0,
-            () => w.Write(EventField.armspan, e.ArmSpan)
-        );
-
-        any |= WriteIf(
             e.markerType != MarkerType.None,
             () => w.Write(EventField.markerType, (byte)e.markerType)
         );
@@ -337,6 +448,11 @@ public class ReplaySerializer
         any |= WriteIf(
             e.damage != 0,
             () => w.Write(EventField.damage, (byte)e.damage)
+        );
+
+        any |= WriteIf(
+            e.fxType != FXOneShotType.None,
+            () => w.Write(EventField.fxType, (byte)e.fxType)
         );
 
         return any;
@@ -558,17 +674,21 @@ public class ReplaySerializer
 
         var values = new System.Collections.Generic.Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
         {
-            ["Host"] = $"<#FFF>{header.Players?.FirstOrDefault(p => p.WasHost)?.Name ?? ""}<#FFF>",
-            ["Client"] = $"<#FFF>{header.Players?.FirstOrDefault(p => !p.WasHost)?.Name ?? ""}<#FFF>",
-            ["LocalPlayer"] = $"<#FFF>{header.Players?[0]?.Name}<#FFF>",
+            ["Host"] = $"<#FFF>{header.Players?.FirstOrDefault(p => p.WasHost)?.Name ?? "Unknown"}<#FFF>",
+            ["Client"] = $"<#FFF>{header.Players?.FirstOrDefault(p => !p.WasHost)?.Name ?? "Unknown"}<#FFF>",
+            ["LocalPlayer"] = $"<#FFF>{header.Players?[0]?.Name ?? "Unknown"}<#FFF>",
             ["Scene"] = finalScene,
             ["Map"] = finalScene,
             ["DateTime"] = parsedDate == DateTime.MinValue ? "Unknown Date" : parsedDate,
             ["PlayerCount"] = $"{header.Players?.Length ?? 0} Player{((header.Players?.Length ?? 0) == 1 ? "" : "s")}",
-            ["Version"] = header.Version ?? "",
+            ["Version"] = header.Version ?? "Unknown Version",
             ["StructureCount"] = (header.Structures?.Length.ToString() ?? "0") + " Structure" + ((header.Structures?.Length ?? 0) == 1 ? "" : "s"),
-            ["Title"] = header.Title,
-            ["Duration"] = $"{duration.Minutes}:{duration.Seconds:D2}",
+            ["MarkerCount"] = header.MarkerCount,
+            ["AveragePing"] = header.AvgPing,
+            ["MinimumPing"] = header.MinPing,
+            ["MaximumPing"] = header.MaxPing,
+            ["Title"] = !string.IsNullOrEmpty(header.Title) ? header.Title : "Unknown Title",
+            ["Duration"] = header.Duration > 0 ? $"{duration.Minutes}:{duration.Seconds:D2}" : "Unknown",
             ["FPS"] = header.TargetFPS
         };
 
@@ -854,6 +974,17 @@ public class ReplaySerializer
                         p.activeShiftstoneVFX = (PlayerShiftstoneVFX)r.ReadByte(); break;
                     case PlayerField.leftShiftstone: p.leftShiftstone = r.ReadByte(); break;
                     case PlayerField.rightShiftstone: p.rightShiftstone = r.ReadByte(); break;
+                    case PlayerField.lgripInput: p.lgripInput = r.ReadSingle(); break;
+                    case PlayerField.lthumbInput: p.lthumbInput = r.ReadSingle(); break;
+                    case PlayerField.lindexInput: p.lindexInput = r.ReadSingle(); break;
+                    case PlayerField.rindexInput: p.rindexInput = r.ReadSingle(); break;
+                    case PlayerField.rthumbInput: p.rthumbInput = r.ReadSingle(); break;
+                    case PlayerField.rgripInput: p.rgripInput = r.ReadSingle(); break;
+                    case PlayerField.rockCamActive: p.rockCamActive = r.ReadBoolean(); break;
+                    case PlayerField.rockCamPos: p.rockCamPos = r.ReadVector3(); break;
+                    case PlayerField.rockCamRot: p.rockCamRot = r.ReadQuaternion(); break;
+                    case PlayerField.armSpan: p.ArmSpan = r.ReadSingle(); break;
+                    case PlayerField.length: p.Length = r.ReadSingle(); break;
                 }
             }
         );
@@ -873,8 +1004,10 @@ public class ReplaySerializer
                     case StructureField.active: s.active = r.ReadBoolean(); break;
                     case StructureField.grounded: s.grounded = r.ReadBoolean(); break;
                     case StructureField.isFlicked: s.isFlicked = r.ReadBoolean(); break;
-                    case StructureField.isHeld: s.isHeld = r.ReadBoolean(); break;
-                    case StructureField.isShaking: s.isShaking = r.ReadBoolean(); break;
+                    case StructureField.isLeftHeld: s.isLeftHeld = r.ReadBoolean(); break;
+                    case StructureField.isRightHeld: s.isRightHeld = r.ReadBoolean(); break;
+                    case StructureField.currentState: s.currentState = (StructureStateType)r.ReadByte(); break;
+                    case StructureField.isTargetDisk: s.isTargetDisk = r.ReadBoolean(); break;
                 }
             }
         );
@@ -910,10 +1043,9 @@ public class ReplaySerializer
                     case EventField.rotation: e.rotation = r.ReadQuaternion(); break;
                     case EventField.masterId: e.masterId = r.ReadString(); break;
                     case EventField.playerIndex: e.playerIndex = r.ReadInt32(); break;
-                    case EventField.armspan: e.ArmSpan = r.ReadSingle(); break;
-                    case EventField.length: e.Length = r.ReadSingle(); break;
                     case EventField.markerType: e.markerType = (MarkerType)r.ReadByte(); break;
                     case EventField.damage: e.damage = r.ReadInt32(); break;
+                    case EventField.fxType: e.fxType = (FXOneShotType)r.ReadByte(); break;
                 }
             }
         );
@@ -958,9 +1090,11 @@ public class StructureState
     public Quaternion rotation;
     public bool active;
     public bool grounded;
-    public bool isHeld;
+    public bool isLeftHeld;
+    public bool isRightHeld;
     public bool isFlicked;
-    public bool isShaking;
+    public StructureStateType currentState;
+    public bool isTargetDisk;
 
     public StructureState Clone()
     {
@@ -970,9 +1104,11 @@ public class StructureState
             rotation = rotation,
             active = active,
             grounded = grounded,
-            isHeld = isHeld,
+            isLeftHeld = isLeftHeld,
+            isRightHeld = isRightHeld,
             isFlicked = isFlicked,
-            isShaking = isShaking
+            currentState = currentState,
+            isTargetDisk = isTargetDisk
         };
     }
 }
@@ -983,18 +1119,20 @@ public class StructureInfo
     public StructureType Type;
 }
 
-public enum StructureField
+public enum StructureField : byte
 {
     position,
     rotation,
     active,
     grounded,
-    isHeld,
+    isLeftHeld,
+    isRightHeld,
     isFlicked,
-    isShaking
+    currentState,
+    isTargetDisk
 }
 
-public enum StructureType
+public enum StructureType : byte
 {
     Cube,
     Pillar,
@@ -1003,7 +1141,19 @@ public enum StructureType
     Ball,
     CagedBall,
     LargeRock,
-    SmallRock
+    SmallRock,
+    TetheredCagedBall
+}
+
+public enum StructureStateType : byte
+{
+    Default,
+    Free,
+    Frozen,
+    FreeGrounded,
+    StableGrounded,
+    Float,
+    Normal
 }
 
 // ------- Player State -------
@@ -1033,6 +1183,21 @@ public class PlayerState
     public int leftShiftstone;
     public int rightShiftstone;
 
+    public float lgripInput;
+    public float lindexInput;
+    public float lthumbInput;
+    
+    public float rgripInput;
+    public float rindexInput;
+    public float rthumbInput;
+
+    public bool rockCamActive;
+    public Vector3 rockCamPos;
+    public Quaternion rockCamRot;
+
+    public float ArmSpan;
+    public float Length;
+
     public PlayerState Clone()
     {
         return new PlayerState
@@ -1050,7 +1215,18 @@ public class PlayerState
             active = active,
             activeShiftstoneVFX = activeShiftstoneVFX,
             leftShiftstone = leftShiftstone,
-            rightShiftstone = rightShiftstone
+            rightShiftstone = rightShiftstone,
+            lgripInput = lgripInput,
+            lthumbInput = lthumbInput,
+            lindexInput = lindexInput,
+            rgripInput = rgripInput,
+            rindexInput = rindexInput,
+            rthumbInput = rthumbInput,
+            rockCamActive = rockCamActive,
+            rockCamPos = rockCamPos,
+            rockCamRot = rockCamRot,
+            ArmSpan = ArmSpan,
+            Length = Length
         };
     }
 }
@@ -1087,7 +1263,7 @@ public class PlayerInfo
     public PlayerInfo() { }
 }
 
-public enum PlayerField {
+public enum PlayerField : byte {
     VRRigPos,
     VRRigRot,
     
@@ -1107,7 +1283,22 @@ public enum PlayerField {
     
     activeShiftstoneVFX,
     leftShiftstone,
-    rightShiftstone
+    rightShiftstone,
+    
+    lgripInput,
+    lindexInput,
+    lthumbInput,
+    
+    rgripInput,
+    rindexInput,
+    rthumbInput,
+    
+    rockCamActive,
+    rockCamPos,
+    rockCamRot,
+    
+    armSpan,
+    length
 }
 
 [Flags]
@@ -1121,20 +1312,6 @@ public enum PlayerShiftstoneVFX : byte
 }
 
 [Serializable]
-public enum PlayerShiftstones : byte
-{
-    None,
-    Vigor,
-    Guard,
-    Flow,
-    Stubborn,
-    Charge,
-    Volatile,
-    Surge,
-    Adamant
-}
-
-[Serializable]
 public class VoiceTrackInfo
 {
     public int ActorId;
@@ -1142,7 +1319,7 @@ public class VoiceTrackInfo
     public float StartTime;
 }
 
-public enum StackType {
+public enum StackType : byte {
     None,
     Dash,
     Jump,
@@ -1176,7 +1353,7 @@ public class PedestalState
     }
 }
 
-public enum PedestalField
+public enum PedestalField : byte
 {
     position,
     active
@@ -1191,29 +1368,27 @@ public class EventChunk
     
     // General Info
     public Vector3 position;
-    public Quaternion rotation;
+    public Quaternion rotation = Quaternion.identity;
     public string masterId;
     public int playerIndex;
-
-    // Player measurement
-    public float Length;
-    public float ArmSpan;
     
     // Marker
     public MarkerType markerType;
     
     // Damage HitMarker
     public int damage;
+    
+    // FX
+    public FXOneShotType fxType;
 }
 
 public enum EventType : byte
 {
-    PlayerMeasurement,
     Marker,
-    DamageHitmarker
+    OneShotFX
 }
 
-public enum EventField
+public enum EventField : byte
 {
     type,
     position,
@@ -1223,7 +1398,8 @@ public enum EventField
     armspan,
     markerType,
     playerIndex,
-    damage
+    damage,
+    fxType
 }
 
 [Serializable]
@@ -1236,9 +1412,38 @@ public enum MarkerType : byte
     LargeDamage
 }
 
+[Serializable]
+public enum FXOneShotType : byte
+{
+    None,
+    StructureCollision,
+    Ricochet,
+    Grounded,
+    GroundedSFX,
+    Ungrounded,
+    
+    DustImpact,
+    
+    ImpactLight,
+    ImpactMedium,
+    ImpactHeavy,
+    ImpactMassive,
+    
+    Spawn,
+    Break,
+    BreakDisc,
+    
+    RockCamSpawn,
+    RockCamDespawn,
+    RockCamStick,
+    
+    Fistbump,
+    FistbumpGoin
+}
+
 // ------------------------
 
-public enum ChunkType
+public enum ChunkType : byte
 {
     PlayerState,
     StructureState,

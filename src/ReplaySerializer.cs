@@ -11,10 +11,7 @@ using UnityEngine;
 using System.Threading.Tasks;
 using Il2CppPhoton.Pun;
 using Il2CppRUMBLE.Players;
-using Il2CppRUMBLE.Players.Subsystems;
 using MelonLoader;
-using Utilities = RumbleAnimator.ReplayGlobals.Utilities;
-using ReplayFiles = RumbleAnimator.ReplayGlobals.ReplayFiles;
 using BinaryReader = System.IO.BinaryReader;
 using BinaryWriter = System.IO.BinaryWriter;
 using CompressionLevel = System.IO.Compression.CompressionLevel;
@@ -664,6 +661,10 @@ public class ReplaySerializer
         var scene = Utilities.GetFriendlySceneName(header.Scene);
         var customMap = header.CustomMap;
         var finalScene = string.IsNullOrEmpty(customMap) ? scene : customMap;
+        
+        if (finalScene == "FlatLandSingle")
+            finalScene = "FlatLand";
+        
         var parsedDate = string.IsNullOrEmpty(header.Date)
             ? DateTime.MinValue
             : DateTime.Parse(header.Date);

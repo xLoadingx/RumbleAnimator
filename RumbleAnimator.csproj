@@ -25,7 +25,14 @@
       <None Remove="src\replayobjects" />
       <None Remove="src\replayobjects2" />
       <EmbeddedResource Include="src\replayobjects" />
-      <EmbeddedResource Include="src\replayobjects2" />
+      <None Remove="src\replayobjects3" />
+      <None Remove="src\replayobjects4" />
+      <None Remove="src\replayobjects5" />
+      <EmbeddedResource Include="src\replayobjects5" />
     </ItemGroup>
+  
+    <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+      <Exec Command="COPY &quot;$(TargetPath)&quot; &quot;E:\SteamLibrary\steamapps\common\RUMBLE\Mods&quot;&#xA;&#xA;COPY &quot;$(TargetPath)&quot; &quot;E:\Visual Studio Projects\RumbleAnimator2.0\ERRORMODS-RumbleAnimator-1.0.0\Mods&quot;" />
+    </Target>
 
 </Project>

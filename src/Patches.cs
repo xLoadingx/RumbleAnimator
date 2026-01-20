@@ -51,7 +51,7 @@ public class Patches
             if (call == null)
                 return;
 
-            FXOneShotType? type = ReplayGlobals.ReplayCache.AudioCallToFX.TryGetValue(call.name, out var foundType) ? foundType : null;
+            FXOneShotType? type = ReplayCache.AudioCallToFX.TryGetValue(call.name, out var foundType) ? foundType : null;
 
             if (type.HasValue)
             {
@@ -94,7 +94,7 @@ public class Patches
 
             if (Main.isRecording || Main.isBuffering)
             {
-                FXOneShotType? type = ReplayGlobals.ReplayCache.VFXNameToFX.TryGetValue(name, out var foundType) ? foundType : null;
+                FXOneShotType? type = ReplayCache.VFXNameToFX.TryGetValue(name, out var foundType) ? foundType : null;
 
                 if (type.HasValue)
                 {
@@ -257,7 +257,7 @@ public class Patches
             if (!Main.isRecording && !Main.isBuffering)
                 return;
 
-            if (ReplayGlobals.ReplayCache.NameToStackType.TryGetValue(stack.cachedName, out var type))
+            if (ReplayCache.NameToStackType.TryGetValue(stack.cachedName, out var type))
                 activations.Add((__instance.ParentController.assignedPlayer.Data.GeneralData.PlayFabMasterId, (short)type));
         }
     }
@@ -276,7 +276,7 @@ public class Patches
     {
         static void Prefix(PlayerHandPresence __instance, InputManager.Hand hand, ref PlayerHandPresence.HandPresenceInput input)
         {
-            if (!Main.isPlaying || !ReplayGlobals.Utilities.IsReplayClone(__instance.parentController) || Main.instance.PlaybackPlayers == null)
+            if (!Main.isPlaying || !Utilities.IsReplayClone(__instance.parentController) || Main.instance.PlaybackPlayers == null)
                 return;
 
             Clone playbackPlayer = null;
@@ -306,7 +306,7 @@ public class Patches
     {
         static bool Prefix(PlayerHealth __instance)
         {
-            if (!Main.isPlaying || !ReplayGlobals.Utilities.IsReplayClone(__instance.parentController))
+            if (!Main.isPlaying || !Utilities.IsReplayClone(__instance.parentController))
                 return true;
 
             return false;

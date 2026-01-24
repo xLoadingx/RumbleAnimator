@@ -302,7 +302,7 @@ public class Patches
     }
 
     [HarmonyPatch(typeof(PlayerHealth), nameof(PlayerHealth.AttemptResetHealth))]
-    public class Patch_PlayerHealth_AttemptResetHealth
+    public class Patch_PlayerHealth_AttemptResetHealth 
     {
         static bool Prefix(PlayerHealth __instance)
         {

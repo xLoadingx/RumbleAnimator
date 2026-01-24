@@ -427,14 +427,8 @@ public static class ReplayFiles
     {
         Directory.CreateDirectory(Path.Combine(replayFolder, "Replays"));
         
-        Task.Run(() =>
-        {
-            foreach (var path in replayPaths)
-                ReplaySerializer.GetManifest(path);
-        });
-        
-        StartWatchingReplays();
         EnsureDefaultFormats();
+        StartWatchingReplays();
     }
 
     public static void EnsureDefaultFormats()

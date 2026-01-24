@@ -643,7 +643,13 @@ public class Main : MelonMod
         replayTable.indexText = indexText.GetComponent<TextMeshPro>();
         replayTable.metadataText = metadataTMP;
         
-        loadReplayButtonComp.OnPressed.AddListener((UnityAction)(() => { if (!isPlaying) LoadSelectedReplay(); }));
+        loadReplayButtonComp.OnPressed.AddListener((UnityAction)(() =>
+        {
+            if (isPlaying)
+                StopReplay();
+
+            LoadSelectedReplay();
+        }));
         
         ReplayFiles.table = replayTable;
         ReplayFiles.HideMetadata();
@@ -920,7 +926,7 @@ public class Main : MelonMod
 
         var deleteButton = GameObject.Instantiate(crystalizeButton, replaySettingsPanel.transform.GetChild(1));
         deleteButton.name = "DeleteReplay";
-        deleteButton.transform.localPosition = new Vector3(0.21f, -0.1349f, -0.0138f);
+        deleteButton.transform.localPosition = new Vector3(0.21f, -0.5582f, -0.0138f);
         deleteButton.transform.rotation = Quaternion.identity;
         deleteButton.transform.localScale = Vector3.one * 2f;
 
@@ -979,12 +985,42 @@ public class Main : MelonMod
         
         var deleteReplayText = GameObject.Instantiate(renameInstructions, deleteButton.transform);
         deleteReplayText.name = "DeleteText";
-        deleteReplayText.transform.localPosition = new Vector3(0.0171f, 0.0713f, 0);
+        deleteReplayText.transform.localPosition = new Vector3(0.0143f, 0.0713f, 0);
         deleteReplayText.SetActive(true);
         deleteReplayText.transform.localScale = Vector3.one * 0.2f;
         
         var deleteReplayTextComp = deleteReplayText.GetComponent<TextMeshPro>();
         deleteReplayTextComp.text = "<#cc1b1b>DELETE REPLAY";
+        
+        var copyPathButton = GameObject.Instantiate(deleteButton, replaySettingsPanel.transform.GetChild(1));
+        copyPathButton.name = "CopyPathButton";
+        copyPathButton.transform.localPosition = new Vector3(-0.0337f, -0.5589f, -0.0138f);
+
+        copyPathButton.transform.GetChild(2).GetComponent<TextMeshPro>().text = "Copy Path";
+        copyPathButton.transform.GetChild(2).GetComponent<TextMeshPro>().ForceMeshUpdate();
+        copyPathButton.transform.GetChild(2).localPosition = new Vector3(0.0143f, 0.0713f, 0);
+
+        var srCo = copyPathButton.transform.GetChild(0).GetChild(3).GetComponent<SpriteRenderer>();
+        var textureCo = bundle2.LoadAsset<Texture2D>("copytoclipboard");
+        srCo.sprite = Sprite.Create(
+            textureCo,
+            new Rect(0, 0, textureCo.width, textureCo.height),
+            new Vector3(0.5f, 0.5f),
+            100f
+        );
+        srCo.color = Color.white;
+        srCo.transform.localRotation = Quaternion.Euler(270, 180, 0);
+        srCo.transform.localScale = Vector3.one * -0.015f;
+        srCo.name = "CopyPathIcon";
+        
+        var copyPathButtonComp = copyPathButton.transform.GetChild(0).GetComponent<InteractionButton>();
+        copyPathButtonComp.useLongPress = false;
+        
+        copyPathButtonComp.onPressed.RemoveAllListeners();
+        copyPathButtonComp.onPressed.AddListener((UnityAction)(() =>
+        {
+            GUIUtility.systemCopyBuffer = ReplayFiles.currentReplayPath;
+        }));
         
         replaySettings = replaySettingsPanel.AddComponent<ReplaySettings>();
         
@@ -2624,7 +2660,7 @@ public class Main : MelonMod
 
             // ------------
             
-            structureComp.currentVelocity = velocity;
+            structureComp.currentVelocity = velocity * playbackSpeed;
 
             if (sa.active && sb.active)
             {
@@ -2639,6 +2675,8 @@ public class Main : MelonMod
             
             foreach (var vfx in playbackStructure.GetComponentsInChildren<VisualEffect>())
                 vfx.playRate = Abs(playbackSpeed);
+
+            structureComp.currentFrictionVFX.visualEffect.playRate = Abs(playbackSpeed);
         }
 
         // ------ Players ------

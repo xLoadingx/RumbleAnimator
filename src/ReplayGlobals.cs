@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -183,6 +184,51 @@ public static class Utilities
         }
 
         return null;
+    }
+
+    public static string[] RebuildCustomMapFromScene()
+    {
+        var parent = GameObject.Find("CustomMapParent");
+        if (parent == null) return null;
+
+        List<string> data = new List<string>();
+        data.Add("1");
+        data.Add(parent.transform.childCount.ToString());
+
+        for (int i = 0; i < parent.transform.childCount; i++)
+        {
+            var child = parent.transform.GetChild(i);
+
+            string name = child.name;
+
+            Color color = Color.white;
+            var renderer = child.GetComponent<Renderer>();
+            if (renderer != null && renderer.material != null && renderer.material.HasProperty("_Color"))
+                color = renderer.material.color;
+
+            Vector3 pos = child.position;
+            Vector3 rot = child.rotation.eulerAngles;
+            Vector3 scale = child.localScale;
+
+            data.Add(name);
+            data.Add(color.r.ToString(CultureInfo.InvariantCulture));
+            data.Add(color.g.ToString(CultureInfo.InvariantCulture));
+            data.Add(color.b.ToString(CultureInfo.InvariantCulture));
+            
+            data.Add(pos.x.ToString(CultureInfo.InvariantCulture));
+            data.Add(pos.y.ToString(CultureInfo.InvariantCulture));
+            data.Add(pos.z.ToString(CultureInfo.InvariantCulture));
+            
+            data.Add(rot.x.ToString(CultureInfo.InvariantCulture));
+            data.Add(rot.y.ToString(CultureInfo.InvariantCulture));
+            data.Add(rot.z.ToString(CultureInfo.InvariantCulture));
+            
+            data.Add(scale.x.ToString(CultureInfo.InvariantCulture));
+            data.Add(scale.y.ToString(CultureInfo.InvariantCulture));
+            data.Add(scale.z.ToString(CultureInfo.InvariantCulture));
+        }
+
+        return data.ToArray();
     }
 
     public static GameObject GetCustomMap(string mapName)

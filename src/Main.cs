@@ -18,8 +18,11 @@ using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppRUMBLE.Pools;
 using Il2CppRUMBLE.Poses;
 using Il2CppRUMBLE.Utilities;
+using Il2CppSystem.IO;
+using Il2CppSystem.Reflection;
 using Il2CppTMPro;
 using MelonLoader;
+using MelonLoader.Utils;
 using RumbleModdingAPI;
 using RumbleModUI;
 using UnityEngine;
@@ -28,7 +31,7 @@ using UnityEngine.InputSystem.XR;
 using UnityEngine.UI;
 using UnityEngine.VFX;
 using static UnityEngine.Mathf;
-
+using File = System.IO.File;
 using InteractionButton = Il2CppRUMBLE.Interactions.InteractionBase.InteractionButton;
 using Mod = RumbleModUIPlus.Mod;
 using Random = UnityEngine.Random;
@@ -372,12 +375,15 @@ public class Main : MelonMod
     IEnumerator DelayedParkLoad()
     {
         yield return new WaitForSeconds(2f);
-        
-        Calls.GameObjects.Park.LOGIC.ParkInstance.GetGameObject().SetActive(false);
-        PhotonNetwork.LeaveRoom();
 
-        yield return new WaitForSeconds(1f);
-        
+        if (currentScene == "Park")
+        {
+            Calls.GameObjects.Park.LOGIC.ParkInstance.GetGameObject().SetActive(false);
+            PhotonNetwork.LeaveRoom();
+            
+            yield return new WaitForSeconds(1f);
+        }
+
         LoadReplay(ReplayFiles.currentReplayPath);
         SimpleScreenFadeInstance.Progress = 0f;
     }
@@ -1222,6 +1228,12 @@ public class Main : MelonMod
 
         string customMap = Utilities.GetActiveCustomMapName();
 
+        if (string.IsNullOrEmpty(customMap))
+        {
+            string[] rebuilt = Utilities.RebuildCustomMapFromScene();
+            customMap = string.Join("|", rebuilt);
+        }
+
         if (currentScene == "Gym" && flatLandRoot?.gameObject.activeSelf == false)
             customMap = "FlatLandSingle";
 
@@ -1322,6 +1334,7 @@ public class Main : MelonMod
         bool switchingScene = targetScene != currentScene;
 
         bool isCustomMap = targetScene is "Map0" or "Map1" && !string.IsNullOrWhiteSpace(ReplayFiles.currentHeader.CustomMap);
+        bool isRawMapData = !string.IsNullOrWhiteSpace(ReplayFiles.currentHeader.CustomMap) && ReplayFiles.currentHeader.CustomMap.Split('|').Length > 15;
 
         GameObject replayCustomMap = null;
 
@@ -1346,7 +1359,7 @@ public class Main : MelonMod
             }
         }
         
-        if (switchingScene && isCustomMap)
+        if (switchingScene && isCustomMap && !isRawMapData)
         {
             replayCustomMap = Utilities.GetCustomMap(ReplayFiles.currentHeader.CustomMap);
 
@@ -1416,10 +1429,30 @@ public class Main : MelonMod
                             }
                         }
 
-                        if (isCustomMap && replayCustomMap != null)
+                        if (isCustomMap)
                         {
-                            replayCustomMap.SetActive(true);
-
+                            if (replayCustomMap != null)
+                            {
+                                replayCustomMap.SetActive(true);
+                            }
+                            else if (isRawMapData)
+                            {
+                                var type = RegisteredMelons.FirstOrDefault(m => m.Info.Name == "CustomMultiplayerMaps")?.MelonAssembly?.Assembly?.GetTypes()?.FirstOrDefault(t => t.Name == "main");
+                                if (type != null)
+                                {
+                                    var method = type.GetMethod(
+                                        "LoadCustomMap", 
+                                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                                        null,
+                                        new Type[] { typeof(string[]) },
+                                        null
+                                    );
+                                    
+                                    string[] split = ReplayFiles.currentHeader.CustomMap.Split('|');
+                                    method?.Invoke(null, new object[] { split });
+                                }
+                            }
+                            
                             if (targetScene == "Map0")
                                 Calls.GameObjects.Map0.Map0production
                                     .GetGameObject()
@@ -1633,7 +1666,7 @@ public class Main : MelonMod
 
         TimeSpan t = TimeSpan.FromSeconds(currentReplay.Header.Duration);
         ReplayPlaybackControls.totalDuration.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
-        ReplayPlaybackControls.currentDuration.text = "0:00";
+        ReplayPlaybackControls.currentDuration.text = "0:00"; 
 
         ReplayPlaybackControls.playbackTitle.text = currentReplay.Header.Title;
 
@@ -1669,7 +1702,6 @@ public class Main : MelonMod
     {
         if (!isPlaying) return;
         isPlaying = false;
-        
         ReplayPlaybackControls.Close();
 
         foreach (var structure in PlaybackStructures)
@@ -1678,6 +1710,7 @@ public class Main : MelonMod
 
             var comp = structure.GetComponent<Structure>();
             comp.indistructable = false;
+            GameObject.Destroy(comp.currentFrictionVFX.gameObject);
 
             foreach (var effect in structure.GetComponentsInChildren<VisualEffect>())
                 GameObject.Destroy(effect);
@@ -1865,6 +1898,9 @@ public class Main : MelonMod
 
         if (currentScene != "Loader")
             ReplayCrystals.HandleCrystals();
+
+        if (Input.GetKeyDown(KeyCode.H))
+            ReplayFiles.NextReplay();
         
         if (currentScene != "Gym" || replayTable == null || replayTable.metadataText == null)
             return;
@@ -2499,6 +2535,9 @@ public class Main : MelonMod
                 try {
                     structureComp.onStructureDestroyed?.Invoke();
                 } catch { }
+                
+                if (structureComp.currentFrictionVFX != null)
+                    GameObject.Destroy(structureComp.currentFrictionVFX);
             }
             
             // Structure Spawned
@@ -2675,8 +2714,9 @@ public class Main : MelonMod
             
             foreach (var vfx in playbackStructure.GetComponentsInChildren<VisualEffect>())
                 vfx.playRate = Abs(playbackSpeed);
-
-            structureComp.currentFrictionVFX.visualEffect.playRate = Abs(playbackSpeed);
+            
+            if (structureComp.currentFrictionVFX != null)
+                structureComp.currentFrictionVFX.visualEffect.playRate = Abs(playbackSpeed);
         }
 
         // ------ Players ------

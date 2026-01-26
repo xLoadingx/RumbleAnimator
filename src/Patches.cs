@@ -10,11 +10,13 @@ using Il2CppRUMBLE.Players;
 using Il2CppRUMBLE.Players.Scaling;
 using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppRUMBLE.Pools;
+using Il2CppSystem.Reflection;
 using MelonLoader;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.VFX;
 using static UnityEngine.Mathf;
+using MethodBase = System.Reflection.MethodBase;
 using SceneManager = Il2CppRUMBLE.Managers.SceneManager;
 
 namespace RumbleAnimator;

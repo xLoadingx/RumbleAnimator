@@ -933,7 +933,7 @@ public class Main : MelonMod
         var deleteButton = GameObject.Instantiate(crystalizeButton, replaySettingsPanel.transform.GetChild(1));
         deleteButton.name = "DeleteReplay";
         deleteButton.transform.localPosition = new Vector3(0.21f, -0.5582f, -0.0138f);
-        deleteButton.transform.rotation = Quaternion.identity;
+        deleteButton.transform.localRotation = Quaternion.identity;
         deleteButton.transform.localScale = Vector3.one * 2f;
 
         var deleteButtonComp = deleteButton.transform.GetChild(0).GetComponent<InteractionButton>();
@@ -1001,6 +1001,7 @@ public class Main : MelonMod
         var copyPathButton = GameObject.Instantiate(deleteButton, replaySettingsPanel.transform.GetChild(1));
         copyPathButton.name = "CopyPathButton";
         copyPathButton.transform.localPosition = new Vector3(-0.0337f, -0.5589f, -0.0138f);
+        copyPathButton.transform.localRotation = Quaternion.identity;
 
         copyPathButton.transform.GetChild(2).GetComponent<TextMeshPro>().text = "Copy Path";
         copyPathButton.transform.GetChild(2).GetComponent<TextMeshPro>().ForceMeshUpdate();
@@ -1032,7 +1033,8 @@ public class Main : MelonMod
         
         var renameButton = GameObject.Instantiate(deleteButton, replaySettingsPanel.transform.GetChild(1));
         renameButton.name = "RenameButton";
-        renameButton.transform.localPosition = new Vector3(-0.2155f, -0.1349f, -0.0138f);
+        renameButton.transform.localPosition = new Vector3(-0.2817f, -0.556f, -0.0138f);
+        renameButton.transform.localRotation = Quaternion.identity;
         
         var renameButtonComp = renameButton.transform.GetChild(0).GetComponent<InteractionButton>();
         renameButtonComp.onPressed.RemoveAllListeners();
@@ -1444,7 +1446,7 @@ public class Main : MelonMod
                                         "LoadCustomMap", 
                                         System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
                                         null,
-                                        new Type[] { typeof(string[]) },
+                                        new[] { typeof(string[]) },
                                         null
                                     );
                                     
@@ -2733,7 +2735,11 @@ public class Main : MelonMod
             {
                 playbackPlayer.Controller.GetSubsystem<PlayerHealth>().SetHealth(pb.Health, (short)state.health);
 
-                if (pb.Health < pa.Health && frameIndex != 0 && pb.Health != 0 && currentReplay.Header.Scene != "Gym")
+                bool tookDamage =
+                    (playbackSpeed >= 0f && pb.Health < pa.Health) ||
+                    (playbackSpeed < 0f && pb.Health > pa.Health);
+                
+                if (tookDamage && frameIndex != 0 && pb.Health != 0 && currentReplay.Header.Scene != "Gym")
                 {
                     var pool = PoolManager.instance.GetPool("PlayerHitmarker");
                     var effect = GameObject.Instantiate(pool.poolItem.gameObject, VFXParent.transform);
@@ -2745,7 +2751,7 @@ public class Main : MelonMod
                     effect.gameObject.AddComponent<DeleteAfterSeconds>();
 
                     var hitmarker = effect.GetComponent<PlayerHitmarker>();
-                    hitmarker.SetDamage(pa.Health - pb.Health);
+                    hitmarker.SetDamage(Abs(pa.Health - pb.Health));
                     hitmarker.gameObject.SetActive(true);
                     hitmarker.Play();
                     hitmarker.GetComponent<VisualEffect>().playRate = Abs(playbackSpeed);

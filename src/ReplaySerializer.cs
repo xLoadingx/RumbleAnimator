@@ -666,7 +666,7 @@ public class ReplaySerializer
             finalScene = "FlatLand";
 
         if (finalScene.StartsWith("1|"))
-            finalScene = "Unknown Custom Map - received via multiplayer";
+            finalScene = "Unknown Custom Map";
         
         var parsedDate = string.IsNullOrEmpty(header.Date)
             ? DateTime.MinValue

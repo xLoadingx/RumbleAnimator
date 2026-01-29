@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - "src/**"
+      - ".github/workflows/*"
 jobs:
   build:
     uses: ./.github/workflows/build.yml

@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
+using Il2CppPhoton.Pun;
 using Il2CppRUMBLE.Audio;
+using Il2CppRUMBLE.Environment;
 using Il2CppRUMBLE.Input;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
@@ -271,6 +273,17 @@ public class Patches
     public class Patch_SceneManager_LoadSceneAsync
     {
         static void Prefix() => Main.instance.StopReplay();
+    }
+
+    [HarmonyPatch(typeof(ParkBoardTrigger), nameof(ParkBoardTrigger.OnTriggerEnter))]
+    public class Patch_ParkBoardTrigger_OnTriggerEnter
+    {
+        static void Postfix(Collider other)
+        {
+            // In a replay park
+            if (PhotonNetwork.CurrentRoom == null)
+                MelonCoroutines.Start(Utilities.LoadMap(1));
+        }
     }
 
     [HarmonyPatch(typeof(PlayerHandPresence), nameof(PlayerHandPresence.UpdateHandPresenceAnimationStates))]

@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -655,7 +656,17 @@ public class ReplaySerializer
         brotli.CopyTo(output);
         return output.ToArray();
     }
-    
+
+    public static string GetReplayDisplayName(string path, ReplayHeader header, string alternativeName = null)
+    {
+        var name = alternativeName ?? Path.GetFileNameWithoutExtension(path);
+
+        var pattern = name.StartsWith("Replay", StringComparison.OrdinalIgnoreCase)
+            ? header.Title
+            : name;
+
+        return FormatReplayString(pattern, header);
+    }
     
     public static string FormatReplayString(string pattern, ReplayHeader header)
     {
@@ -671,11 +682,15 @@ public class ReplaySerializer
         
         var parsedDate = string.IsNullOrEmpty(header.Date)
             ? DateTime.MinValue
-            : DateTime.Parse(header.Date);
+            : DateTime.Parse(header.Date, CultureInfo.InvariantCulture);
         var duration = TimeSpan.FromSeconds(header.Duration);
         
         string GetPlayer(int index) =>
             index >= 0 && index < header.Players?.Length ? $"<#FFF>{header.Players[index].Name}<#FFF>" : "";
+
+        string durationStr = duration.TotalHours >= 1
+            ? $"{(int)duration.TotalHours}:{duration.Minutes:D2}:{duration.Seconds:D2}"
+            : $"{(int)duration.TotalMinutes}:{duration.Seconds:D2}";
 
         var values = new System.Collections.Generic.Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
         {
@@ -693,7 +708,7 @@ public class ReplaySerializer
             ["MinimumPing"] = header.MinPing,
             ["MaximumPing"] = header.MaxPing,
             ["Title"] = !string.IsNullOrEmpty(header.Title) ? header.Title : "Unknown Title",
-            ["Duration"] = header.Duration > 0 ? $"{duration.Minutes}:{duration.Seconds:D2}" : "Unknown",
+            ["Duration"] = header.Duration > 0 ? durationStr : "Unknown",
             ["FPS"] = header.TargetFPS
         };
 

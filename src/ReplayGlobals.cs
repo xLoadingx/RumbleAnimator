@@ -737,7 +737,7 @@ public static class ReplayFiles
             {
                 var header = GetManifest(currentReplayPath);
                 currentHeader = header;
-                table.replayNameText.text = Main.instance.replaySettings.GetDisplayName(currentReplayPath);
+                table.replayNameText.text = ReplaySerializer.GetReplayDisplayName(currentReplayPath, currentHeader);
                 Main.instance.replaySettings.Show(currentReplayPath);
                 
                 var format = GetMetadataFormat(header.Scene);
@@ -907,6 +907,7 @@ public static class ReplayPlaybackControls
 public class ReplaySettings : MonoBehaviour
 {
     private string currentPath;
+    private ReplaySerializer.ReplayHeader currentHeader;
     
     public static TextMeshPro replayName;
     public static TextMeshPro dateText;
@@ -919,45 +920,35 @@ public class ReplaySettings : MonoBehaviour
 
     public static GameObject timeline;
 
-    private string originalName;
     private bool isRenaming = false;
     private StringBuilder renameBuffer = new();
-
-    public string GetDisplayName(string path)
-    {
-        string fileName = Path.GetFileNameWithoutExtension(path);
-
-        ReplaySerializer.ReplayHeader header = ReplaySerializer.GetManifest(path);
-        if (fileName.StartsWith("Replay") && !string.IsNullOrEmpty(header.Title))
-            return header.Title;
-
-        return fileName;
-    }
+    private string rawReplayName;
 
     public void Show(string path)
     {
         currentPath = path;
-        var header = ReplaySerializer.GetManifest(path);
-        
-        replayName.text = GetDisplayName(path);
-        replayName.ForceMeshUpdate();
+        currentHeader = ReplaySerializer.GetManifest(path);
 
-        dateText.text = ReplaySerializer.FormatReplayString("{DateTime:yyyy/MM/dd hh:mm tt}", header);
+        rawReplayName = Path.GetFileNameWithoutExtension(path);
+        
+        replayName.text = ReplaySerializer.GetReplayDisplayName(path, currentHeader);
+        replayName.ForceMeshUpdate();
+        
+        renameBuffer.Clear();
+        renameBuffer.Append(rawReplayName);
+
+        dateText.text = ReplaySerializer.FormatReplayString("{DateTime:yyyy/MM/dd hh:mm tt}", currentHeader);
         dateText.ForceMeshUpdate();
 
-        originalName = replayName.text;
-        renameBuffer.Clear();
-        renameBuffer.Append(originalName);
-
-        timeline.transform.GetChild(0).GetComponent<TimelineScrubber>().header = header;
-        timeline.GetComponent<MeshRenderer>().material.SetFloat("_BP_Target", header.Duration * 1000f);
-        Main.AddMarkers(header, timeline.GetComponent<MeshRenderer>(), false);
+        timeline.transform.GetChild(0).GetComponent<TimelineScrubber>().header = currentHeader;
+        timeline.GetComponent<MeshRenderer>().material.SetFloat("_BP_Target", currentHeader.Duration * 1000f);
+        Main.AddMarkers(currentHeader, timeline.GetComponent<MeshRenderer>(), false);
         
-        renameButton.SetButtonToggleStatus(false, true);
+        renameButton.SetButtonToggleStatus(false, withEvents: true);
         renameInstructions.gameObject.SetActive(false);
         isRenaming = false;
 
-        TimeSpan t = TimeSpan.FromSeconds(header.Duration);
+        TimeSpan t = TimeSpan.FromSeconds(currentHeader.Duration);
         durationComp.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
         durationComp.ForceMeshUpdate();
         
@@ -980,7 +971,7 @@ public class ReplaySettings : MonoBehaviour
         
         if (Input.GetKeyDown(KeyCode.Escape))
         {
-            replayName.text = originalName;
+            replayName.text = ReplaySerializer.GetReplayDisplayName(currentPath, currentHeader);
             replayName.ForceMeshUpdate();
             renameButton.SetButtonToggleStatus(false, true);
             renameInstructions.gameObject.SetActive(false);
@@ -1008,7 +999,7 @@ public class ReplaySettings : MonoBehaviour
             }
         }
 
-        replayName.text = renameBuffer.ToString();
+        replayName.text = ReplaySerializer.GetReplayDisplayName(currentPath, currentHeader, renameBuffer.ToString());
         replayName.ForceMeshUpdate();
     }
 
@@ -1016,7 +1007,7 @@ public class ReplaySettings : MonoBehaviour
     {
         if (toggleState)
         {
-            replayName.text = originalName;
+            replayName.text = ReplaySerializer.GetReplayDisplayName(currentPath, currentHeader);
             replayName.ForceMeshUpdate();
             isRenaming = false;
             renameInstructions.gameObject.SetActive(false);
@@ -1025,7 +1016,8 @@ public class ReplaySettings : MonoBehaviour
         {
             isRenaming = true;
             renameBuffer.Clear();
-            renameBuffer.Append(originalName);
+            renameBuffer.Append(rawReplayName);
+            
             renameInstructions.gameObject.SetActive(true);
         }
     }
@@ -1206,7 +1198,6 @@ public static class ReplayCrystals
 
         return closest;
     }
-
     
     public static Crystal CreateCrystal(Vector3 position, ReplaySerializer.ReplayHeader header, string path, bool useAnimation = false, bool applyRandomColor = false)
     {

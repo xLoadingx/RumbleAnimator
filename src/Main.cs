@@ -351,6 +351,22 @@ public class Main : MelonMod
             replayTable.TableRoot.SetActive(false);
             replayTable.metadataText.gameObject.SetActive(false);
         }
+
+        if (isReplayScene)
+        {
+            MatchHandler matchHandler = currentScene switch
+            {
+                "Map1" => Calls.GameObjects.Map1.Logic.MatchHandler.GetGameObject().GetComponent<MatchHandler>(),
+                "Map0" => Calls.GameObjects.Map0.Logic.MatchHandler.GetGameObject().GetComponent<MatchHandler>(),
+                _ => null
+            };
+
+            if (matchHandler != null)
+            {
+                matchHandler.CurrentMatchPhase = MatchHandler.MatchPhase.MatchStart;
+                matchHandler.FadeIn();
+            }
+        }
         
         ReplayCrystals.LoadCrystals(currentScene);
         ReplayFiles.LoadReplays();
@@ -468,14 +484,16 @@ public class Main : MelonMod
             "Possible values:\n" +
             "- Save Replay Buffer\n" +
             "- Add Marker (adds an event marker at the current time in a recording)\n" +
-            "- None", new Tags());
+            "- None\n" +
+            "Actions can be seperated by a comma to include multiple actions on press.", new Tags());
         
         RightHandControls = rumbleAnimatorMod.AddToList("Right Controller Binding", "None",
             "Selects the action performed when both buttons on the right controller are pressed at the same time.\n" +
             "Possible values:\n" +
             "- Save Replay Buffer\n" +
             "- Add Marker (adds an event marker at the current time in a recording)\n" +
-            "- None", new Tags());
+            "- None\n" +
+            "Actions can be seperated by a comma to include multiple actions on press.", new Tags());
 
         EnableHaptics = rumbleAnimatorMod.AddToList("Enable Haptics", true, 0, "Plays controller haptics when actions such as saving a replay or adding a marker are performed.", new Tags());
 
@@ -499,22 +517,28 @@ public class Main : MelonMod
         
         var allowedBindings = new[] { "Save Replay Buffer", "Add Marker", "None" };
 
+        bool IsValidBindingList(string input)
+        {
+            return input
+                .Split(',')
+                .Select(s => s.Trim())
+                .All(binding => 
+                    allowedBindings.Contains(binding, StringComparer.OrdinalIgnoreCase)
+                );
+        }
+        
         LeftHandControls.SavedValueChanged += (obj, sender) =>
         {
             string value = (string)LeftHandControls.Value;
-            if (!allowedBindings.Contains(value, StringComparer.OrdinalIgnoreCase))
-            {
+            if (!IsValidBindingList(value)) 
                 ReplayError($"'{value}' is not a valid binding (Left Controller)");
-            }
         };
 
         RightHandControls.SavedValueChanged += (obj, sender) =>
         {
             string value = (string)RightHandControls.Value;
-            if (!allowedBindings.Contains(value, StringComparer.OrdinalIgnoreCase))
-            {
+            if (!IsValidBindingList(value))
                 ReplayError($"'{value}' is not a valid binding (Right Controller).");
-            }
         };
         
         rumbleAnimatorMod.GetFromFile();
@@ -651,9 +675,6 @@ public class Main : MelonMod
         
         loadReplayButtonComp.OnPressed.AddListener((UnityAction)(() =>
         {
-            if (isPlaying)
-                StopReplay();
-
             LoadSelectedReplay();
         }));
         
@@ -785,6 +806,8 @@ public class Main : MelonMod
         
         // Playback Controls
 
+        var layer = LayerMask.NameToLayer("PlayerFade");
+        
         var playbackControls = GameObject.Instantiate(Calls.GameObjects.Gym.LOGIC.School.LogoSlab.NotificationSlab.SlabbuddyInfovariant.InfoForm.GetGameObject());
         playbackControls.name = "Playback Controls";
         playbackControls.transform.localScale = Vector3.one;
@@ -801,16 +824,21 @@ public class Main : MelonMod
         timelineMaterial.SetFloat("_Has_RC_Requirement", 0f);
 
         timeline.name = "Timeline";
+        timeline.layer = layer;
         timeline.transform.localPosition = new Vector3(0, -0.1091f, 0);
         timeline.transform.localScale = new Vector3(1.0715f, 0.0434f, 1);
         timeline.transform.localRotation = Quaternion.identity;
         timeline.SetActive(true);
 
-        BoxCollider col = timeline.AddComponent<BoxCollider>();
+        var colliderObj = new GameObject("TimelineCollider");
+        colliderObj.transform.SetParent(timeline.transform, false);
+        colliderObj.layer = LayerMask.NameToLayer("InteractionBase");
+        
+        var col = colliderObj.AddComponent<BoxCollider>();
         col.center = timeline.GetComponent<MeshRenderer>().localBounds.center;
         col.size = timeline.GetComponent<MeshRenderer>().localBounds.size;
-        timeline.AddComponent<TimelineScrubber>();
-        timeline.layer = LayerMask.NameToLayer("InteractionBase");
+        
+        colliderObj.AddComponent<TimelineScrubber>();
 
         var currentDuration = Calls.Create.NewText(":3", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
         var totalDuration = Calls.Create.NewText(":3", 1f, Color.white, Vector3.zero, Quaternion.identity).GetComponent<TextMeshPro>();
@@ -819,6 +847,7 @@ public class Main : MelonMod
         
         currentDuration.transform.SetParent(playbackControls.transform.GetChild(1));
         currentDuration.name = "Current Duration";
+        currentDuration.gameObject.layer = layer;
 
         currentDuration.transform.localScale = Vector3.one * 0.8f;
         currentDuration.transform.localPosition = new Vector3(-0.2633f, -0.0412f, 0);
@@ -826,6 +855,7 @@ public class Main : MelonMod
         
         totalDuration.transform.SetParent(playbackControls.transform.GetChild(1));
         totalDuration.name = "Total Duration";
+        totalDuration.gameObject.layer = layer;
 
         totalDuration.transform.localScale = Vector3.one * 0.8f;
         totalDuration.transform.localPosition = new Vector3(0.696f, -0.0412f, 0);
@@ -833,6 +863,7 @@ public class Main : MelonMod
         
         playbackTitle.transform.SetParent(playbackControls.transform.GetChild(1));
         playbackTitle.name = "Playback Title";
+        playbackTitle.gameObject.layer = layer;
         
         playbackTitle.transform.localScale = Vector3.one * 1.2f;
         playbackTitle.transform.localPosition = new Vector3(0, 0.5916f, 0);
@@ -842,6 +873,7 @@ public class Main : MelonMod
         
         playbackSpeedText.transform.SetParent(playbackControls.transform.GetChild(1));
         playbackSpeedText.name = "Playback Speed";
+        playbackSpeedText.gameObject.layer = layer;
 
         playbackSpeedText.transform.localScale = Vector3.one * 1.3f;
         playbackSpeedText.transform.localPosition = new Vector3(0, 0.019f, 0);
@@ -854,6 +886,11 @@ public class Main : MelonMod
         var np5x = GameObject.Instantiate(friendScrollBar.transform.GetChild(1).gameObject, playbackControls.transform.GetChild(1));
         var p1x = GameObject.Instantiate(friendScrollBar.transform.GetChild(2).gameObject, playbackControls.transform.GetChild(1));
         var np1x = GameObject.Instantiate(friendScrollBar.transform.GetChild(3).gameObject, playbackControls.transform.GetChild(1));
+
+        p5x.layer = layer;
+        np5x.layer = layer;
+        p1x.layer = layer;
+        np1x.layer = layer;
 
         var compp5x = p5x.transform.GetChild(0).GetComponent<InteractionButton>();
         compp5x.enabled = true;
@@ -897,6 +934,7 @@ public class Main : MelonMod
 
         var markerPrefab = GameObject.CreatePrimitive(PrimitiveType.Cube);
         markerPrefab.name = "ReplayMarker";
+        markerPrefab.layer = layer;
         markerPrefab.SetActive(false);
         
         var markerRenderer = markerPrefab.GetComponent<MeshRenderer>();
@@ -1233,7 +1271,9 @@ public class Main : MelonMod
         if (string.IsNullOrEmpty(customMap))
         {
             string[] rebuilt = Utilities.RebuildCustomMapFromScene();
-            customMap = string.Join("|", rebuilt);
+            
+            if (rebuilt != null)
+                customMap = string.Join("|", rebuilt);
         }
 
         if (currentScene == "Gym" && flatLandRoot?.gameObject.activeSelf == false)
@@ -1331,6 +1371,9 @@ public class Main : MelonMod
             ReplayError("Could not find file.");
             return;
         }
+        
+        if (isPlaying)
+            StopReplay();
 
         string targetScene = ReplayFiles.currentHeader.Scene;
         bool switchingScene = targetScene != currentScene;
@@ -1712,14 +1755,21 @@ public class Main : MelonMod
 
             var comp = structure.GetComponent<Structure>();
             comp.indistructable = false;
-            GameObject.Destroy(comp.currentFrictionVFX.gameObject);
+            
+            if (comp.currentFrictionVFX != null)
+                GameObject.Destroy(comp.currentFrictionVFX.gameObject);
 
             foreach (var effect in structure.GetComponentsInChildren<VisualEffect>())
                 GameObject.Destroy(effect);
         }
 
         foreach (var structure in HiddenStructures)
-            structure.gameObject.SetActive(true);
+        {
+            if (structure != null)
+                structure.gameObject.SetActive(true);
+        }
+        
+        HiddenStructures.Clear();
         
         if (replayStructures != null)
             GameObject.Destroy(replayStructures);
@@ -1901,9 +1951,6 @@ public class Main : MelonMod
         if (currentScene != "Loader")
             ReplayCrystals.HandleCrystals();
 
-        if (Input.GetKeyDown(KeyCode.H))
-            ReplayFiles.NextReplay();
-        
         if (currentScene != "Gym" || replayTable == null || replayTable.metadataText == null)
             return;
 
@@ -1945,18 +1992,18 @@ public class Main : MelonMod
     {
         if (currentScene == "Loader") return;
 
-        string rightAction = (string)RightHandControls.SavedValue;
-        string leftAction = (string)LeftHandControls.SavedValue;
+        var rightActions = ((string)RightHandControls.SavedValue).Split(',').Select(a => a.Trim()).ToArray();
+        var leftActions = ((string)LeftHandControls.SavedValue).Split(',').Select(a => a.Trim()).ToArray();
         
         TryHandleController(
-            leftAction,
+            leftActions,
             Calls.ControllerMap.LeftController.GetPrimary(),
             Calls.ControllerMap.LeftController.GetSecondary(),
             true
         );
         
         TryHandleController(
-            rightAction,
+            rightActions,
             Calls.ControllerMap.RightController.GetPrimary(),
             Calls.ControllerMap.RightController.GetSecondary(),
             false
@@ -2377,7 +2424,7 @@ public class Main : MelonMod
     }
 
     public void TryHandleController(
-        string action,
+        string[] actions,
         float primary,
         float secondary,
         bool isLeft
@@ -2395,9 +2442,6 @@ public class Main : MelonMod
                     haptics.PlayControllerHaptics(0, 0, 1f, 0.05f);
             }
         }
-        
-        if (action.Equals("None", StringComparison.OrdinalIgnoreCase))
-            return;
 
         if (primary <= 0 || secondary <= 0)
             return;
@@ -2407,36 +2451,42 @@ public class Main : MelonMod
         
         lastTriggerTime = Time.time;
 
-        switch (action)
+        foreach (var action in actions)
         {
-            case "Save Replay Buffer":
-            {
-                SaveReplayBuffer();
-                PlayHaptics();
-                break;
-            }
-
-            case "Add Marker":
-            {
-                if (!isRecording && !isBuffering)
-                    break;
-                
-                EventChunk evt = new EventChunk
-                {
-                    type = EventType.Marker,
-                    markerType = MarkerType.Manual,
-                };
-                Events.Add(evt);
-                
-                PlayHaptics();
-                
-                AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_BackwardLocked"], head.position);
-                break;
-            }
+            if (action.Equals("None", StringComparison.OrdinalIgnoreCase))
+                return;
             
-            default:
-                ReplayError($"'{action}' is not a valid binding ({(isLeft ? "Left Controller" : "Right Controller")}).");
-                break;
+            switch (action)
+            {
+                case "Save Replay Buffer":
+                {
+                    SaveReplayBuffer();
+                    PlayHaptics();
+                    break;
+                }
+
+                case "Add Marker":
+                {
+                    if (!isRecording && !isBuffering)
+                        break;
+                
+                    EventChunk evt = new EventChunk
+                    {
+                        type = EventType.Marker,
+                        markerType = MarkerType.Manual,
+                    };
+                    Events.Add(evt);
+                
+                    PlayHaptics();
+                
+                    AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_BackwardLocked"], head.position);
+                    break;
+                }
+            
+                default:
+                    ReplayError($"'{action}' is not a valid binding ({(isLeft ? "Left Controller" : "Right Controller")}).");
+                    break;
+            }
         }
     }
     
@@ -2539,7 +2589,7 @@ public class Main : MelonMod
                 } catch { }
                 
                 if (structureComp.currentFrictionVFX != null)
-                    GameObject.Destroy(structureComp.currentFrictionVFX);
+                    GameObject.Destroy(structureComp.currentFrictionVFX.gameObject);
             }
             
             // Structure Spawned

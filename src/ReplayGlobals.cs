@@ -911,10 +911,13 @@ public class ReplaySettings : MonoBehaviour
     public static TextMeshPro replayName;
     public static TextMeshPro dateText;
     public static TextMeshPro renameInstructions;
+    public static TextMeshPro durationComp;
     
     public static InteractionButton renameButton;
     public static InteractionButton deleteButton;
     public static InteractionButton copyPathButton;
+
+    public static GameObject timeline;
 
     private string originalName;
     private bool isRenaming = false;
@@ -945,6 +948,18 @@ public class ReplaySettings : MonoBehaviour
         originalName = replayName.text;
         renameBuffer.Clear();
         renameBuffer.Append(originalName);
+
+        timeline.transform.GetChild(0).GetComponent<TimelineScrubber>().header = header;
+        timeline.GetComponent<MeshRenderer>().material.SetFloat("_BP_Target", header.Duration * 1000f);
+        Main.AddMarkers(header, timeline.GetComponent<MeshRenderer>(), false);
+        
+        renameButton.SetButtonToggleStatus(false, true);
+        renameInstructions.gameObject.SetActive(false);
+        isRenaming = false;
+
+        TimeSpan t = TimeSpan.FromSeconds(header.Duration);
+        durationComp.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
+        durationComp.ForceMeshUpdate();
         
         isRenaming = false;
     }
@@ -1193,16 +1208,18 @@ public static class ReplayCrystals
     }
 
     
-    public static Crystal CreateCrystal(Vector3 position, ReplaySerializer.ReplayHeader header, bool useAnimation = false, bool applyRandomColor = false)
+    public static Crystal CreateCrystal(Vector3 position, ReplaySerializer.ReplayHeader header, string path, bool useAnimation = false, bool applyRandomColor = false)
     {
         if (crystalParent == null)
             crystalParent = new GameObject("Crystals");
         
         Crystal crystal = GameObject.Instantiate(crystalPrefab, crystalParent.transform).AddComponent<Crystal>();
             
-        crystal.name = $"Crystal ({header.Title}, {header.Date})";
+        var name = Path.GetFileNameWithoutExtension(path).StartsWith("Replay") ? header.Title : Path.GetFileNameWithoutExtension(path);
+        
+        crystal.name = $"Crystal ({name}, {header.Date})";
         crystal.transform.position = position;
-        crystal.Title = header.Title;
+        crystal.Title = name;
 
         GameObject text = Calls.Create.NewText(header.Title, 1f, Color.white, Vector3.zero, Quaternion.identity);
 

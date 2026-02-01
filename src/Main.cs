@@ -784,7 +784,7 @@ public class Main : MelonMod
                 AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_Bake_Part"], crystalizeButton.transform.position);
                 
                 var header = ReplayFiles.currentHeader;
-                ReplayCrystals.CreateCrystal(replayTable.transform.position + new Vector3(0, 0.3f, 0), header, true);
+                ReplayCrystals.CreateCrystal(replayTable.transform.position + new Vector3(0, 0.3f, 0), header, ReplayFiles.currentReplayPath, true);
             }
             else
             {
@@ -956,6 +956,18 @@ public class Main : MelonMod
         replaySettingsPanel.transform.localPosition = new Vector3(0.3782f, 0.88f, 0.1564f);
         replaySettingsPanel.transform.localRotation = Quaternion.Euler(34.4376f, 90, 90);
         
+        var timelineRS = GameObject.Instantiate(timeline, replaySettingsPanel.transform.GetChild(1));
+        timelineRS.name = "Timeline";
+        timelineRS.layer = LayerMask.NameToLayer("Default");
+        timelineRS.transform.localPosition = new Vector3(0, -0.2726f, 0);
+        timelineRS.transform.localScale = new Vector3(0.9346f, 0.0529f, 1.9291f);
+        timelineRS.transform.localRotation = Quaternion.identity;
+        
+        var durationRS = GameObject.Instantiate(totalDuration, replaySettingsPanel.transform.GetChild(1));
+        durationRS.name = "TotalDuration";
+        durationRS.gameObject.layer = LayerMask.NameToLayer("Default");
+        durationRS.transform.localPosition = new Vector3(0.2265f, -0.1898f, 0);
+        
         var replayNameTitle = GameObject.Instantiate(playbackTitle.gameObject, replaySettingsPanel.transform.GetChild(1));
         replayNameTitle.transform.localPosition = new Vector3(0, 0.6316f, 0);
         replayNameTitle.name = "Replay Title";
@@ -1098,6 +1110,8 @@ public class Main : MelonMod
         ReplaySettings.dateText = dateComp;
         ReplaySettings.renameInstructions = renameInstructionsComp;
         ReplaySettings.renameButton = renameButtonComp;
+        ReplaySettings.timeline = timelineRS;
+        ReplaySettings.durationComp = durationRS;
         
         GameObject.DontDestroyOnLoad(ReplayTable);
         GameObject.DontDestroyOnLoad(crystalPrefab);
@@ -1718,16 +1732,34 @@ public class Main : MelonMod
 
         TimeSpan t = TimeSpan.FromSeconds(currentReplay.Header.Duration);
         ReplayPlaybackControls.totalDuration.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
-        ReplayPlaybackControls.currentDuration.text = "0:00"; 
+        ReplayPlaybackControls.currentDuration.text = "0:00";
 
-        ReplayPlaybackControls.playbackTitle.text = currentReplay.Header.Title;
+        ReplayPlaybackControls.playbackTitle.text = Path.GetFileNameWithoutExtension(path).StartsWith("Replay") 
+            ? currentReplay.Header.Title 
+            : Path.GetFileNameWithoutExtension(path);
+        
+        ReplayPlaybackControls.timeline.transform.GetChild(0).GetComponent<TimelineScrubber>().header = currentReplay.Header;
 
-        var markers = currentReplay.Header.Markers;
+        AddMarkers(currentReplay.Header, timelineRenderer);
+    }
+
+    public static Marker[] AddMarkers(ReplaySerializer.ReplayHeader header, MeshRenderer timelineRenderer, bool hideMarkers = true)
+    {
+        foreach (var marker in timelineRenderer.transform.GetComponentsInChildren<ReplayTag>())
+            GameObject.Destroy(marker.gameObject);
+        
+        if (header.Markers == null)
+            return null;
+        
+        var markers = header.Markers;
         
         foreach (var marker in markers)
         {
-            Vector3 position = Utilities.GetPositionOverMesh(marker.time, currentReplay.Header.Duration, timelineRenderer);
-            GameObject markerObj = GameObject.Instantiate(ReplayPlaybackControls.markerPrefab, ReplayPlaybackControls.timeline.transform);
+            Vector3 position = Utilities.GetPositionOverMesh(marker.time, header.Duration, timelineRenderer);
+            GameObject markerObj = GameObject.Instantiate(ReplayPlaybackControls.markerPrefab, timelineRenderer.transform);
+
+            if (!hideMarkers)
+                markerObj.layer = LayerMask.NameToLayer("Default");
 
             markerObj.transform.localScale = new Vector3(0.0062f, 1.0836f, 0.0128f);
             markerObj.transform.position = position;
@@ -1742,8 +1774,11 @@ public class Main : MelonMod
             };
 
             markerObj.GetComponent<MeshRenderer>().material.SetColor("_Overlay", color);
+            markerObj.AddComponent<ReplayTag>();
             markerObj.SetActive(true);
         }
+
+        return markers;
     }
     
     public void StopReplay()
@@ -3481,6 +3516,8 @@ public class DeleteAfterSeconds : MonoBehaviour
 [RegisterTypeInIl2Cpp]
 public class TimelineScrubber : MonoBehaviour
 {
+    public ReplaySerializer.ReplayHeader header;
+    
     private void OnTriggerEnter(Collider other)
     {
         if (!IsFinger(other.gameObject, out var isLeft))
@@ -3498,11 +3535,14 @@ public class TimelineScrubber : MonoBehaviour
             return;
         
         Vector3 point = other.ClosestPointOnBounds(transform.position);
-        float u = Utilities.GetProgressFromMeshPosition(point, ReplayPlaybackControls.timeline.GetComponent<MeshRenderer>());
+        float u = Utilities.GetProgressFromMeshPosition(point, GetComponentInParent<MeshRenderer>());
 
-        float time = u * Main.currentReplay.Header.Duration;
+        float time = u * header.Duration;
         
-        Main.instance.SetPlaybackTime(time);
+        GetComponentInParent<MeshRenderer>().material?.SetFloat("_BP_Current", time * 1000f);
+        
+        if (Main.currentReplay != null)
+            Main.instance.SetPlaybackTime(time);
     }
     
     private void OnTriggerExit(Collider other)

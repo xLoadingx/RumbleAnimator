@@ -1338,7 +1338,7 @@ public static class ReplayCrystals
         );
     }
 
-    public static IEnumerator CrystalBreakAnimation(ReplaySerializer.ReplayHeader header, Crystal crystal = null, float dist = 0.005f)
+    public static IEnumerator CrystalBreakAnimation(string replayPath, Crystal crystal = null, float dist = 0.005f)
     {
         AudioManager.instance.Play(ReplayCache.SFX["Call_GearMarket_ButtonUnpress"], Main.instance.replayTable.transform.position);
 
@@ -1446,6 +1446,8 @@ public static class ReplayCrystals
         Crystals.Remove(crystal);
         GameObject.Destroy(crystal);
         SaveCrystals();
+
+        File.Delete(replayPath);
 
         Main.instance.crystalBreakCoroutine = null;
     }

@@ -466,7 +466,7 @@ public class Main : MelonMod
             .AddSetting(automaticMarkersFolder);
 
         var playbackFolder = rumbleAnimatorMod.AddFolder("Playback", "Settings for playing back replays.");
-        StopReplayWhenDone = rumbleAnimatorMod.AddToList("Stop Replay On Finished", true, 0, "Stops a replay when it reaches the end or beginning of its duration.", new Tags());
+        StopReplayWhenDone = rumbleAnimatorMod.AddToList("Stop Replay On Finished", false, 0, "Stops a replay when it reaches the end or beginning of its duration.", new Tags());
         playbackFolder.AddSetting(StopReplayWhenDone);
 
         var replayBufferFolder = rumbleAnimatorMod.AddFolder("Replay Buffer", "Settings for the replay buffer used to save recent gameplay.");
@@ -811,6 +811,7 @@ public class Main : MelonMod
         var playbackControls = GameObject.Instantiate(Calls.GameObjects.Gym.LOGIC.School.LogoSlab.NotificationSlab.SlabbuddyInfovariant.InfoForm.GetGameObject());
         playbackControls.name = "Playback Controls";
         playbackControls.transform.localScale = Vector3.one;
+        playbackControls.transform.GetChild(0).GetChild(0).gameObject.layer = layer;
 
         GameObject.Destroy(playbackControls.transform.GetChild(2).gameObject);
         
@@ -887,11 +888,6 @@ public class Main : MelonMod
         var p1x = GameObject.Instantiate(friendScrollBar.transform.GetChild(2).gameObject, playbackControls.transform.GetChild(1));
         var np1x = GameObject.Instantiate(friendScrollBar.transform.GetChild(3).gameObject, playbackControls.transform.GetChild(1));
 
-        p5x.layer = layer;
-        np5x.layer = layer;
-        p1x.layer = layer;
-        np1x.layer = layer;
-
         var compp5x = p5x.transform.GetChild(0).GetComponent<InteractionButton>();
         compp5x.enabled = true;
         compp5x.onPressed.RemoveAllListeners();
@@ -952,6 +948,7 @@ public class Main : MelonMod
         var replaySettingsPanel = GameObject.Instantiate(playbackControls, ReplayTable.transform);
         replaySettingsPanel.name = "Replay Settings";
         replaySettingsPanel.transform.localScale = Vector3.one;
+        replaySettingsPanel.transform.GetChild(0).GetChild(0).gameObject.layer = LayerMask.NameToLayer("Default");
         
         for (int i = 0; i < replaySettingsPanel.transform.GetChild(1).childCount; i++)
             GameObject.Destroy(replaySettingsPanel.transform.GetChild(1).GetChild(i).gameObject);
@@ -962,11 +959,13 @@ public class Main : MelonMod
         var replayNameTitle = GameObject.Instantiate(playbackTitle.gameObject, replaySettingsPanel.transform.GetChild(1));
         replayNameTitle.transform.localPosition = new Vector3(0, 0.6316f, 0);
         replayNameTitle.name = "Replay Title";
+        replayNameTitle.layer = LayerMask.NameToLayer("Default");
         
         var dateText = GameObject.Instantiate(playbackTitle.gameObject, replaySettingsPanel.transform.GetChild(1));
         dateText.transform.localPosition = new Vector3(0, 0.4989f, 0);
         dateText.transform.localScale = Vector3.one * 0.7f;
         dateText.name = "Date";
+        dateText.layer = LayerMask.NameToLayer("Default");
 
         var deleteButton = GameObject.Instantiate(crystalizeButton, replaySettingsPanel.transform.GetChild(1));
         deleteButton.name = "DeleteReplay";
@@ -986,7 +985,7 @@ public class Main : MelonMod
                 if (crystalBreakCoroutine == null)
                 {
                     ReplayCrystals.Crystal crystal = ReplayCrystals.Crystals.FirstOrDefault(c => c.ReplayPath == ReplayFiles.currentReplayPath);
-                    crystalBreakCoroutine = MelonCoroutines.Start(ReplayCrystals.CrystalBreakAnimation(ReplayFiles.currentHeader, crystal));
+                    crystalBreakCoroutine = MelonCoroutines.Start(ReplayCrystals.CrystalBreakAnimation(ReplayFiles.currentReplayPath, crystal));
                 }
             }
             else 
@@ -1295,7 +1294,6 @@ public class Main : MelonMod
                 CustomMap = customMap,
                 FrameCount = frames.Length,
                 PedestalCount = Pedestals.Count,
-                MarkerCount = frames.Sum(f => f.Events.Count(e => e.type == EventType.Marker)),
                 AvgPing = pingCount > 0 ? pingSum / pingCount : -1,
                 MinPing = pingMin,
                 MaxPing = pingMax,
@@ -1306,6 +1304,15 @@ public class Main : MelonMod
             },
             Frames = frames
         };
+        
+        var markers = frames
+            .SelectMany(f => f.Events ?? Array.Empty<EventChunk>(), (f, e) => new { f.Time, Event = e})
+            .Where(x => x.Event.type == EventType.Marker)
+            .Select(x => new Marker{ type = x.Event.markerType, time = x.Time })
+            .ToArray();
+
+        replayInfo.Header.MarkerCount = markers.Length;
+        replayInfo.Header.Markers = markers;
         
         string pattern = Utilities.GetFriendlySceneName(recordingSceneName) switch
         {
@@ -1715,11 +1722,7 @@ public class Main : MelonMod
 
         ReplayPlaybackControls.playbackTitle.text = currentReplay.Header.Title;
 
-        var markers = currentReplay.Frames
-            .SelectMany(f => f.Events
-                .Where(e => e.markerType != MarkerType.None)
-                .Select(e => (time: f.Time, type: e.markerType)))
-            .ToList();
+        var markers = currentReplay.Header.Markers;
         
         foreach (var marker in markers)
         {
@@ -2562,7 +2565,7 @@ public class Main : MelonMod
             {
                 "Disc" or "Ball" => 1f,
                 "RockCube" => 1.5f,
-                "Wall" or "Pillar" => 2.5f,
+                "Wall" => 2f,
 
                 "LargeRock" => 2.7f,
 

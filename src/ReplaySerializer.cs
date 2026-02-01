@@ -173,6 +173,7 @@ public class ReplaySerializer
 
         public PlayerInfo[] Players;
         public StructureInfo[] Structures;
+        public Marker[] Markers;
 
         public string Guid;
     }
@@ -913,8 +914,8 @@ public class ReplaySerializer
 
             frames[f] = frame;
         }
-        return frames;
         
+        return frames;
     }
     
     
@@ -1394,16 +1395,14 @@ public enum EventType : byte
 
 public enum EventField : byte
 {
-    type,
-    position,
-    rotation,
-    masterId,
-    length,
-    armspan,
-    markerType,
-    playerIndex,
-    damage,
-    fxType
+    type = 0,
+    position = 1,
+    rotation = 2,
+    masterId = 3,
+    markerType = 6,
+    playerIndex = 7,
+    damage = 8,
+    fxType = 9
 }
 
 [Serializable]
@@ -1414,6 +1413,13 @@ public enum MarkerType : byte
     RoundEnd,
     MatchEnd,
     LargeDamage
+}
+
+[Serializable]
+public class Marker
+{
+    public MarkerType type;
+    public float time;
 }
 
 [Serializable]

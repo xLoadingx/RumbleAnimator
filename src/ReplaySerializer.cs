@@ -18,7 +18,7 @@ using BinaryWriter = System.IO.BinaryWriter;
 using CompressionLevel = System.IO.Compression.CompressionLevel;
 using MemoryStream = System.IO.MemoryStream;
 
-namespace RumbleAnimator;
+namespace ReplayMod;
 
 public static class BinaryExtensions
 {

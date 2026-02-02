@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
 // using Concentus;
 // using Concentus.Enums;
 // using Concentus.Oggfile;
@@ -28,12 +27,11 @@ using MelonLoader.Utils;
 using Newtonsoft.Json;
 using RumbleModdingAPI;
 using UnityEngine;
-using UnityEngine.Events;
 using UnityEngine.VFX;
 using static UnityEngine.Mathf;
 using Random = UnityEngine.Random;
 
-namespace RumbleAnimator;
+namespace ReplayMod;
 
 public static class ReplayCache
 {
@@ -450,7 +448,7 @@ public static class Utilities
 
 public static class ReplayFiles
 {
-    public static string replayFolder = $"{MelonEnvironment.UserDataDirectory}/RumblePlayback";
+    public static string replayFolder = $"{MelonEnvironment.UserDataDirectory}/ReplayMod";
     
     public static List<string> replayPaths = new();
     public static int currentIndex = -1;
@@ -1120,7 +1118,7 @@ public static class ReplayCrystals
         
         string path = Path.Combine(
             MelonEnvironment.UserDataDirectory,
-            "RumblePlayback",
+            "ReplayMod",
             "Settings",
             "replayCrystals.json"
         );
@@ -1147,7 +1145,7 @@ public static class ReplayCrystals
         
         string path = Path.Combine(
             MelonEnvironment.UserDataDirectory,
-            "RumblePlayback",
+            "ReplayMod",
             "Settings",
             "replayCrystals.json"
         );
@@ -1821,7 +1819,7 @@ internal static class ReplayVoices
     private static PunVoiceClient voice;
     
     private static readonly Dictionary<(int playerId, int voiceId), VoiceStreamWriter> writers = new();
-    public static string tempVoiceDir = Path.Combine(MelonEnvironment.UserDataDirectory, "RumblePlayback", "TempVoices");
+    public static string tempVoiceDir = Path.Combine(MelonEnvironment.UserDataDirectory, "ReplayMod", "TempVoices");
     
     public static List<VoiceTrackInfo> voiceTrackInfos = new();
 

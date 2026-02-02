@@ -4,6 +4,7 @@
         <LangVersion>latest</LangVersion>
         <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
+        <RootNamespace>ReplayMod</RootNamespace>
     </PropertyGroup>
 
     <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
@@ -32,7 +33,7 @@
     </ItemGroup>
   
     <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-      <Exec Command="COPY &quot;$(TargetPath)&quot; &quot;E:\SteamLibrary\steamapps\common\RUMBLE\Mods&quot;&#xA;&#xA;COPY &quot;$(TargetPath)&quot; &quot;E:\Projects\RumbleAnimator2.0\ERRORMODS-RumbleAnimator-1.0.0\Mods&quot;&#xA;" />
+      <Exec Command="COPY &quot;$(TargetPath)&quot; &quot;E:\SteamLibrary\steamapps\common\RUMBLE\Mods&quot;&#xA;&#xA;COPY &quot;$(TargetPath)&quot; &quot;E:\Projects\ReplayMod\ERRORMODS-ReplayMod-1.0.0\Mods&quot;&#xA;" />
     </Target>
 
 </Project>

@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RumbleAnimator", "RumbleAnimator.csproj", "{1C9FB74C-42BF-4707-97D0-B59ED0220526}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ReplayMod", "ReplayMod.csproj", "{1C9FB74C-42BF-4707-97D0-B59ED0220526}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

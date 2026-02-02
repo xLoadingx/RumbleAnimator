@@ -21,7 +21,7 @@ using static UnityEngine.Mathf;
 using MethodBase = System.Reflection.MethodBase;
 using SceneManager = Il2CppRUMBLE.Managers.SceneManager;
 
-namespace RumbleAnimator;
+namespace ReplayMod;
 
 public class Patches
 {

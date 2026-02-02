@@ -19,10 +19,8 @@ using Il2CppRUMBLE.Pools;
 using Il2CppRUMBLE.Poses;
 using Il2CppRUMBLE.Utilities;
 using Il2CppSystem.IO;
-using Il2CppSystem.Reflection;
 using Il2CppTMPro;
 using MelonLoader;
-using MelonLoader.Utils;
 using RumbleModdingAPI;
 using RumbleModUI;
 using UnityEngine;
@@ -31,22 +29,21 @@ using UnityEngine.InputSystem.XR;
 using UnityEngine.UI;
 using UnityEngine.VFX;
 using static UnityEngine.Mathf;
-using File = System.IO.File;
 using InteractionButton = Il2CppRUMBLE.Interactions.InteractionBase.InteractionButton;
 using Mod = RumbleModUIPlus.Mod;
 using Random = UnityEngine.Random;
 using Stack = Il2CppRUMBLE.MoveSystem.Stack;
 using Tags = RumbleModUIPlus.Tags;
 
-[assembly: MelonInfo(typeof(RumbleAnimator.Main), RumbleAnimator.BuildInfo.Name, RumbleAnimator.BuildInfo.Version, RumbleAnimator.BuildInfo.Author)]
+[assembly: MelonInfo(typeof(ReplayMod.Main), ReplayMod.BuildInfo.Name, ReplayMod.BuildInfo.Version, ReplayMod.BuildInfo.Author)]
 [assembly: MelonGame("Buckethead Entertainment", "RUMBLE")]
 [assembly: MelonAdditionalDependencies("RumbleModdingAPI","RumbleModUIPlus")]
 
-namespace RumbleAnimator;
+namespace ReplayMod;
 
 public static class BuildInfo
 {
-    public const string Name = "RumbleAnimator";
+    public const string Name = "ReplayMod";
     public const string Author = "ERROR";
     public const string Version = "1.0.0";
     public const string FormatVersion = "1.0.0";
@@ -151,7 +148,7 @@ public class Main : MelonMod
     
     public const float errorsArmspan = 1.2744f;
     
-    private Mod rumbleAnimatorMod = new();
+    private Mod replayMod = new();
 
     // Recording
     public ModSetting<int> TargetRecordingFPS = new();
@@ -423,36 +420,36 @@ public class Main : MelonMod
 
     public void OnUIInitialized()
     {
-        rumbleAnimatorMod.ModName = BuildInfo.Name;
-        rumbleAnimatorMod.ModVersion = BuildInfo.Version;
-        rumbleAnimatorMod.ModFormatVersion = BuildInfo.FormatVersion;
+        replayMod.ModName = BuildInfo.Name;
+        replayMod.ModVersion = BuildInfo.Version;
+        replayMod.ModFormatVersion = BuildInfo.FormatVersion;
 
-        rumbleAnimatorMod.SetFolder("RumblePlayback/Settings");
-        rumbleAnimatorMod.AddDescription("Description", "", "A mod that records scenes into a 3d file that you can replay", new Tags { IsSummary = true });
+        replayMod.SetFolder("ReplayMod/Settings");
+        replayMod.AddDescription("Description", "", "A mod that records scenes into a 3d file that you can replay", new Tags { IsSummary = true });
 
-        var recordingFolder = rumbleAnimatorMod.AddFolder("Recording", "Controls how and when gameplay is recorded into replays.");
+        var recordingFolder = replayMod.AddFolder("Recording", "Controls how and when gameplay is recorded into replays.");
 
-        TargetRecordingFPS = rumbleAnimatorMod.AddToList("Recording FPS", 50, "The target frame rate used when recording replays.\nThis is limited by the game's actual frame rate.", new Tags());
-        AutoRecordMatches = rumbleAnimatorMod.AddToList("Automatically Record Matches", true, 0, "Automatically start recording when you join a match", new Tags());
-        AutoRecordParks = rumbleAnimatorMod.AddToList("Automatically Record Parks", false, 0, "Automatically start recording when you join a park", new Tags());
+        TargetRecordingFPS = replayMod.AddToList("Recording FPS", 50, "The target frame rate used when recording replays.\nThis is limited by the game's actual frame rate.", new Tags());
+        AutoRecordMatches = replayMod.AddToList("Automatically Record Matches", true, 0, "Automatically start recording when you join a match", new Tags());
+        AutoRecordParks = replayMod.AddToList("Automatically Record Parks", false, 0, "Automatically start recording when you join a park", new Tags());
         
-        HandFingerRecording = rumbleAnimatorMod.AddToList("Finger Animation Recording", true, 0, "Controls whether finger input values are recorded into the replay.", new Tags());
-        CloseHandsOnPose = rumbleAnimatorMod.AddToList("Close Hands On Pose", true, 0, "Closes the hands of a clone when they do a pose.", new Tags());
+        HandFingerRecording = replayMod.AddToList("Finger Animation Recording", true, 0, "Controls whether finger input values are recorded into the replay.", new Tags());
+        CloseHandsOnPose = replayMod.AddToList("Close Hands On Pose", true, 0, "Closes the hands of a clone when they do a pose.", new Tags());
         
-        var automaticMarkersFolder = rumbleAnimatorMod.AddFolder("Automatic Markers", "Automatically adds markers to replays when notable events occur.");
+        var automaticMarkersFolder = replayMod.AddFolder("Automatic Markers", "Automatically adds markers to replays when notable events occur.");
 
-        var matchEndFolder = rumbleAnimatorMod.AddFolder("Match End", "Settings for markers added when a match ends.");
-        EnableMatchEndMarker = rumbleAnimatorMod.AddToList("Enable Match End Marker", false, 0, "Automatically adds a marker at the end of a match.", new Tags());
+        var matchEndFolder = replayMod.AddFolder("Match End", "Settings for markers added when a match ends.");
+        EnableMatchEndMarker = replayMod.AddToList("Enable Match End Marker", false, 0, "Automatically adds a marker at the end of a match.", new Tags());
         matchEndFolder.AddSetting(EnableMatchEndMarker);
 
-        var roundEndFolder = rumbleAnimatorMod.AddFolder("Round End", "Settings for markers added at the end of each round.");
-        EnableRoundEndMarker = rumbleAnimatorMod.AddToList("Enable Round End Marker", false, 0, "Automatically adds a marker at the end of a round.", new Tags());
+        var roundEndFolder = replayMod.AddFolder("Round End", "Settings for markers added at the end of each round.");
+        EnableRoundEndMarker = replayMod.AddToList("Enable Round End Marker", false, 0, "Automatically adds a marker at the end of a round.", new Tags());
         roundEndFolder.AddSetting(EnableRoundEndMarker);
 
-        var largeDamageFolder = rumbleAnimatorMod.AddFolder("Large Damage", "Settings for markers triggered by bursts of high damage.");
-        EnableLargeDamageMarker = rumbleAnimatorMod.AddToList("Enable Large Damage Marker", false, 0, "Automatically adds a marker when a player takes a large amount of damage in a short amount of time.", new Tags());
-        DamageThreshold = rumbleAnimatorMod.AddToList("Damage Threshold", 12, "The minimum total damage required to create a marker.", new Tags());
-        DamageWindow = rumbleAnimatorMod.AddToList("Damage Window (seconds)", 1f, "The time window (in seconds) during which damage is summed to determine whether a marker should be created.", new Tags());
+        var largeDamageFolder = replayMod.AddFolder("Large Damage", "Settings for markers triggered by bursts of high damage.");
+        EnableLargeDamageMarker = replayMod.AddToList("Enable Large Damage Marker", false, 0, "Automatically adds a marker when a player takes a large amount of damage in a short amount of time.", new Tags());
+        DamageThreshold = replayMod.AddToList("Damage Threshold", 12, "The minimum total damage required to create a marker.", new Tags());
+        DamageWindow = replayMod.AddToList("Damage Window (seconds)", 1f, "The time window (in seconds) during which damage is summed to determine whether a marker should be created.", new Tags());
         
         largeDamageFolder.AddSetting(EnableLargeDamageMarker)
             .AddSetting(DamageThreshold)
@@ -469,21 +466,21 @@ public class Main : MelonMod
             .AddSetting(CloseHandsOnPose)
             .AddSetting(automaticMarkersFolder);
 
-        var playbackFolder = rumbleAnimatorMod.AddFolder("Playback", "Settings for playing back replays.");
-        StopReplayWhenDone = rumbleAnimatorMod.AddToList("Stop Replay On Finished", false, 0, "Stops a replay when it reaches the end or beginning of its duration.", new Tags());
+        var playbackFolder = replayMod.AddFolder("Playback", "Settings for playing back replays.");
+        StopReplayWhenDone = replayMod.AddToList("Stop Replay On Finished", false, 0, "Stops a replay when it reaches the end or beginning of its duration.", new Tags());
         playbackFolder.AddSetting(StopReplayWhenDone);
 
-        var replayBufferFolder = rumbleAnimatorMod.AddFolder("Replay Buffer", "Settings for the replay buffer used to save recent gameplay.");
+        var replayBufferFolder = replayMod.AddFolder("Replay Buffer", "Settings for the replay buffer used to save recent gameplay.");
 
-        ReplayBufferEnabled = rumbleAnimatorMod.AddToList("Enable Replay Buffer", false, 0, "Keeps a rolling buffer of recent gameplay that can be saved as a replay.", new Tags());
-        ReplayBufferDuration = rumbleAnimatorMod.AddToList("Replay Buffer Duration (seconds)", 30, "How much gameplay time (in seconds) is kept in the replay buffer.", new Tags());
+        ReplayBufferEnabled = replayMod.AddToList("Enable Replay Buffer", false, 0, "Keeps a rolling buffer of recent gameplay that can be saved as a replay.", new Tags());
+        ReplayBufferDuration = replayMod.AddToList("Replay Buffer Duration (seconds)", 30, "How much gameplay time (in seconds) is kept in the replay buffer.", new Tags());
         
         replayBufferFolder.AddSetting(ReplayBufferEnabled);
         replayBufferFolder.AddSetting(ReplayBufferDuration);
         
-        var controlsFolder = rumbleAnimatorMod.AddFolder("Controls", "Controller bindings and feedback settings for replay actions.");
+        var controlsFolder = replayMod.AddFolder("Controls", "Controller bindings and feedback settings for replay actions.");
         
-        LeftHandControls = rumbleAnimatorMod.AddToList("Left Controller Binding", "None",
+        LeftHandControls = replayMod.AddToList("Left Controller Binding", "None",
             "Selects the action performed when both buttons on the left controller are pressed at the same time.\n" +
             "Possible values:\n" +
             "- Save Replay Buffer\n" +
@@ -491,7 +488,7 @@ public class Main : MelonMod
             "- None\n" +
             "Actions can be seperated by a comma to include multiple actions on press.", new Tags());
         
-        RightHandControls = rumbleAnimatorMod.AddToList("Right Controller Binding", "None",
+        RightHandControls = replayMod.AddToList("Right Controller Binding", "None",
             "Selects the action performed when both buttons on the right controller are pressed at the same time.\n" +
             "Possible values:\n" +
             "- Save Replay Buffer\n" +
@@ -499,15 +496,15 @@ public class Main : MelonMod
             "- None\n" +
             "Actions can be seperated by a comma to include multiple actions on press.", new Tags());
 
-        EnableHaptics = rumbleAnimatorMod.AddToList("Enable Haptics", true, 0, "Plays controller haptics when actions such as saving a replay or adding a marker are performed.", new Tags());
+        EnableHaptics = replayMod.AddToList("Enable Haptics", true, 0, "Plays controller haptics when actions such as saving a replay or adding a marker are performed.", new Tags());
 
         controlsFolder.AddSetting(LeftHandControls)
             .AddSetting(RightHandControls)
             .AddSetting(EnableHaptics);
         
-        var otherFolder = rumbleAnimatorMod.AddFolder("Other", "Miscellaneous settings.");
+        var otherFolder = replayMod.AddFolder("Other", "Miscellaneous settings.");
 
-        tableOffset = rumbleAnimatorMod.AddToList("Replay Table Height Offset", 0f, "Adjusts the vertical offset of the replay table in meters.\nUseful if the table feels too high or too low.", new Tags());
+        tableOffset = replayMod.AddToList("Replay Table Height Offset", 0f, "Adjusts the vertical offset of the replay table in meters.\nUseful if the table feels too high or too low.", new Tags());
         
         otherFolder.AddSetting(tableOffset);
 
@@ -545,9 +542,9 @@ public class Main : MelonMod
                 ReplayError($"'{value}' is not a valid binding (Right Controller).");
         };
         
-        rumbleAnimatorMod.GetFromFile();
+        replayMod.GetFromFile();
         
-        UI.instance.AddMod(rumbleAnimatorMod);
+        UI.instance.AddMod(replayMod);
     }
 
     public void LoadReplayObjects()
@@ -557,7 +554,7 @@ public class Main : MelonMod
         ReplayTable.transform.localPosition = new Vector3(5.9506f, 1.3564f, 4.1906f);
         ReplayTable.transform.localRotation = Quaternion.Euler(270f, 121.5819f, 0f);
 
-        AssetBundle bundle = Calls.LoadAssetBundleFromStream(this, "RumbleAnimator.src.replayobjects");
+        AssetBundle bundle = Calls.LoadAssetBundleFromStream(this, "ReplayMod.src.replayobjects");
         
         GameObject table = GameObject.Instantiate(bundle.LoadAsset<GameObject>("Table"), ReplayTable.transform);
 
@@ -722,7 +719,7 @@ public class Main : MelonMod
         
         replayTable.crystalizeButton = crystalizeButtonComp;
 
-        var bundle2 = Calls.LoadAssetBundleFromStream(this, "RumbleAnimator.src.replayobjects5");
+        var bundle2 = Calls.LoadAssetBundleFromStream(this, "ReplayMod.src.replayobjects5");
         
         GameObject crystalPrefab = GameObject.Instantiate(bundle2.LoadAsset<GameObject>("Crystal"));
         
@@ -1557,7 +1554,7 @@ public class Main : MelonMod
     
     public void LoadReplay(string path)
     {
-        if (currentScene == "Park" && (PhotonNetwork.CurrentRoom?.PlayerCount > 1 || (PhotonNetwork.CurrentRoom?.IsVisible ?? false))) // Temporarily 
+        if (currentScene == "Park" && (PhotonNetwork.CurrentRoom?.PlayerCount > 1 || (PhotonNetwork.CurrentRoom?.IsVisible ?? false)))
             return;
         
         currentReplay = ReplaySerializer.LoadReplay(path);

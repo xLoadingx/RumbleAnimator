@@ -109,6 +109,10 @@ public class Main : MelonMod
     public static int currentPlaybackFrame = 0;
 
     public bool isReplayScene;
+
+    public bool hasPaused;
+    public static bool isPaused = false;
+    public static float previousPlaybackSpeed = 1f;
     
     // Roots
     public GameObject ReplayRoot;
@@ -2376,6 +2380,33 @@ public class Main : MelonMod
             closeEnough;
     }
 
+    bool IsPausePlayPose(Transform left, Transform right)
+    {
+        float fingerUpDot = Vector3.Dot(left.forward.normalized, head.up);
+        bool leftHandFlat = Abs(fingerUpDot) < Cos(60f * Deg2Rad);
+
+        float palmDownDot = Vector3.Dot(left.right.normalized, -head.up);
+        bool leftPalmDown = palmDownDot > Cos(60f * Deg2Rad);
+
+        bool leftHandCorrect = leftHandFlat && leftPalmDown;
+        
+        float fingerVerticalDot = Vector3.Dot(right.forward.normalized, head.up);
+        bool rightHandVertical = Abs(fingerVerticalDot) >= Cos(35f * Deg2Rad);
+
+        float palmLeftDot = Vector3.Dot((-right.right).normalized, -head.right);
+        bool rightPalmFacingLeft = palmLeftDot > 0.5f;
+
+        bool rightHandCorrect = rightHandVertical && rightPalmFacingLeft;
+
+        float dist = Vector3.Distance(left.position, right.position);
+        float maxDist = LocalPlayer.Data.PlayerMeasurement.ArmSpan * (0.25f / errorsArmspan);
+
+        bool handsCloseEnough = dist < maxDist;
+        bool leftAboveRight = left.position.y > right.position.y;
+
+        return leftHandCorrect && leftAboveRight && rightHandCorrect && handsCloseEnough;
+    }
+
     public void HandleReplayPose()
     {
         if (currentScene == "Loader")
@@ -2458,6 +2489,54 @@ public class Main : MelonMod
             hasPlayed = false;
             heldTime = 0f;
             soundTimer = 0f;
+        }
+
+        bool isPausePose = IsPausePlayPose(leftHand, rightHand);
+
+        if (isPausePose &&
+            Calls.ControllerMap.LeftController.GetTrigger() < 0.4f &&
+            Calls.ControllerMap.RightController.GetTrigger() < 0.4f &&
+            Calls.ControllerMap.LeftController.GetGrip() < 0.4f &&
+            Calls.ControllerMap.RightController.GetGrip() < 0.4f
+           )
+        {
+            if (!hasPaused)
+            {
+                hasPaused = true;
+                
+                if (isPlaying)
+                {
+                    if (isPaused)
+                    {
+                        isPaused = false;
+                        AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_BackwardLocked"], head.position);
+
+                        if ((bool)EnableHaptics.SavedValue)
+                            LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.05f, 1f, 0.05f);
+                        
+                        SetPlaybackSpeed(previousPlaybackSpeed);
+                    }
+                    else
+                    {
+                        isPaused = true;
+                        previousPlaybackSpeed = playbackSpeed;
+                        AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_ForwardUnlocked"], head.position);
+                        
+                        if ((bool)EnableHaptics.SavedValue)
+                            LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.05f, 1f, 0.05f);
+                        
+                        SetPlaybackSpeed(0f);
+                    }
+                }
+                else
+                {
+                    ReplayError();
+                }
+            }
+        }
+        else if (!isPausePose)
+        {
+            hasPaused = false;
         }
     }
 

@@ -997,7 +997,7 @@ public class ReplaySettings : MonoBehaviour
             }
         }
 
-        replayName.text = ReplaySerializer.GetReplayDisplayName(currentPath, currentHeader, renameBuffer.ToString());
+        replayName.text = ReplaySerializer.GetReplayDisplayName(currentPath, currentHeader, renameBuffer.ToString(), false);
         replayName.ForceMeshUpdate();
     }
 

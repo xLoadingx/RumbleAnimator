@@ -369,6 +369,10 @@ public class Main : MelonMod
             }
         }
         
+        string[] spellings = { "Heisenhouser", "Heisenhowser", "Heisenhouwser", "Heisenhouwer" };
+        replayTable.heisenhouserText.text = spellings[Random.Range(0, spellings.Length)];
+        replayTable.heisenhouserText.ForceMeshUpdate();
+        
         ReplayCrystals.LoadCrystals(currentScene);
         ReplayFiles.LoadReplays();
         
@@ -763,9 +767,8 @@ public class Main : MelonMod
             new Vector3(0.5f, 0.5f),
             100f
         );
-
-        string[] spellings = { "Heisenhouser", "Heisenhowser", "Heisenhouwser", "Heisenhouwer" };
-        GameObject heisenhowuserText = Calls.Create.NewText(spellings[Random.Range(0, spellings.Length)], 1f, Color.white, Vector3.zero, Quaternion.identity);
+        
+        GameObject heisenhowuserText = Calls.Create.NewText("Heisenhouwser", 1f, Color.white, Vector3.zero, Quaternion.identity);
         
         heisenhowuserText.transform.SetParent(ReplayTable.transform);
         heisenhowuserText.name = "HeisenhouswerLogoText";
@@ -773,6 +776,8 @@ public class Main : MelonMod
         heisenhowuserText.transform.localPosition = new Vector3(-0.2891f, 0.3969f, -0.1684f);
         heisenhowuserText.transform.localScale = Vector3.one * 0.2f;
         heisenhowuserText.transform.localRotation = Quaternion.Euler(51.2551f, 110.4334f, 107.2313f);
+
+        replayTable.heisenhouserText = heisenhowuserText.GetComponent<TextMeshPro>();
         
         crystalizeButtonComp.onPressedAudioCall = loadReplayButtonComp.onPressedAudioCall;
         
@@ -886,8 +891,6 @@ public class Main : MelonMod
 
         var p5x = GameObject.Instantiate(friendScrollBar.transform.GetChild(0).gameObject, playbackControls.transform.GetChild(1));
         var np5x = GameObject.Instantiate(friendScrollBar.transform.GetChild(1).gameObject, playbackControls.transform.GetChild(1));
-        var p1x = GameObject.Instantiate(friendScrollBar.transform.GetChild(2).gameObject, playbackControls.transform.GetChild(1));
-        var np1x = GameObject.Instantiate(friendScrollBar.transform.GetChild(3).gameObject, playbackControls.transform.GetChild(1));
 
         var compp5x = p5x.transform.GetChild(0).GetComponent<InteractionButton>();
         compp5x.enabled = true;
@@ -908,26 +911,6 @@ public class Main : MelonMod
         np5x.transform.localScale = Vector3.one * 2f;
         np5x.transform.localPosition = new Vector3(-0.2498f, -0.2493f, 0.1156f);
         np5x.transform.localRotation = Quaternion.Euler(270, 0, 0);
-        
-        var compp1x = p1x.transform.GetChild(0).GetComponent<InteractionButton>();
-        compp1x.enabled = true;
-        compp1x.onPressed.RemoveAllListeners();
-        compp1x.onPressed.AddListener((UnityAction)(() => { AddPlaybackSpeed(1f); }));
-
-        p1x.name = "+1 Speed";
-        p1x.transform.localScale = Vector3.one * 2f;
-        p1x.transform.localPosition = new Vector3(0.4396f, -0.2493f, 0.1156f);
-        p1x.transform.localRotation = Quaternion.Euler(270, 0, 0);
-        
-        var compnp1x = np1x.transform.GetChild(0).GetComponent<InteractionButton>();
-        compnp1x.enabled = true;
-        compnp1x.onPressed.RemoveAllListeners();
-        compnp1x.onPressed.AddListener((UnityAction)(() => { AddPlaybackSpeed(-1f); }));
-
-        np1x.name = "-1 Speed";
-        np1x.transform.localScale = Vector3.one * 2f;
-        np1x.transform.localPosition = new Vector3(-0.4269f, -0.2493f, 0.1156f);
-        np1x.transform.localRotation = Quaternion.Euler(270, 0, 0);
 
         var markerPrefab = GameObject.CreatePrimitive(PrimitiveType.Cube);
         markerPrefab.name = "ReplayMarker";
@@ -1990,7 +1973,7 @@ public class Main : MelonMod
         if (currentScene != "Loader")
             ReplayCrystals.HandleCrystals();
 
-        if (currentScene != "Gym" || replayTable == null || replayTable.metadataText == null)
+        if (currentScene != "Gym" || replayTable == null || replayTable.gameObject || replayTable.metadataText == null)
             return;
 
         bool flatLandActive = flatLandRoot != null && flatLandRoot?.activeSelf == true;
@@ -2500,40 +2483,44 @@ public class Main : MelonMod
             if (!hasPaused)
             {
                 hasPaused = true;
-                
-                if (isPlaying)
-                {
-                    if (isPaused)
-                    {
-                        isPaused = false;
-                        AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_BackwardLocked"], head.position);
-
-                        if ((bool)EnableHaptics.SavedValue)
-                            LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.05f, 1f, 0.05f);
-                        
-                        SetPlaybackSpeed(previousPlaybackSpeed);
-                    }
-                    else
-                    {
-                        isPaused = true;
-                        previousPlaybackSpeed = playbackSpeed;
-                        AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_ForwardUnlocked"], head.position);
-                        
-                        if ((bool)EnableHaptics.SavedValue)
-                            LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.05f, 1f, 0.05f);
-                        
-                        SetPlaybackSpeed(0f);
-                    }
-                }
-                else
-                {
-                    ReplayError();
-                }
+                TogglePlayback();
             }
         }
         else if (!isPausePose)
         {
             hasPaused = false;
+        }
+    }
+
+    public void TogglePlayback()
+    {
+        if (isPlaying)
+        {
+            if (isPaused)
+            {
+                isPaused = false;
+                AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_BackwardLocked"], head.position);
+
+                if ((bool)EnableHaptics.SavedValue)
+                    LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.05f, 1f, 0.05f);
+                        
+                SetPlaybackSpeed(previousPlaybackSpeed);
+            }
+            else
+            {
+                isPaused = true;
+                previousPlaybackSpeed = playbackSpeed;
+                AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_ForwardUnlocked"], head.position);
+                        
+                if ((bool)EnableHaptics.SavedValue)
+                    LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.05f, 1f, 0.05f);
+                        
+                SetPlaybackSpeed(0f);
+            }
+        }
+        else
+        {
+            ReplayError();
         }
     }
 
@@ -3241,7 +3228,16 @@ public class Main : MelonMod
 
         if (ReplayPlaybackControls.playbackSpeedText != null)
         {
-            ReplayPlaybackControls.playbackSpeedText.text = playbackSpeed + "x";
+            string label;
+
+            if (Approximately(playbackSpeed, 0f))
+                label = "Paused";
+            else if (playbackSpeed < 0f)
+                label = $"<< {Abs(playbackSpeed):0.0}x";
+            else
+                label = $"{playbackSpeed:0.0}x";
+            
+            ReplayPlaybackControls.playbackSpeedText.text = label;
             ReplayPlaybackControls.playbackSpeedText.ForceMeshUpdate();
         }
     }
@@ -3486,6 +3482,7 @@ public class ReplayTable : MonoBehaviour
     public TextMeshPro replayNameText;
     public TextMeshPro indexText;
     public TextMeshPro metadataText;
+    public TextMeshPro heisenhouserText;
     
     public float desiredTableHeight = 1.5481f;
     public float tableOffset = 0f;

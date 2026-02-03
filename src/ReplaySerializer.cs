@@ -657,11 +657,11 @@ public class ReplaySerializer
         return output.ToArray();
     }
 
-    public static string GetReplayDisplayName(string path, ReplayHeader header, string alternativeName = null)
+    public static string GetReplayDisplayName(string path, ReplayHeader header, string alternativeName = null, bool showTitle = true)
     {
         var name = alternativeName ?? Path.GetFileNameWithoutExtension(path);
 
-        var pattern = name.StartsWith("Replay", StringComparison.OrdinalIgnoreCase)
+        var pattern = name.StartsWith("Replay", StringComparison.OrdinalIgnoreCase) && showTitle
             ? header.Title
             : name;
 

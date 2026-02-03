@@ -30,11 +30,11 @@ jobs:
           tar -xzf ref.tar.gz
           mv ref .ref # the file server hosting the references wont include dotfiles 3:
       - name: remove that postbuild event 😭
-        run: sed -i '/<Target Name="PostBuild" AfterTargets="PostBuildEvent">/,/<\/Target>/d' RumbleAnimator.csproj
-      - name: Build RumbleAnimator
+        run: sed -i '/<Target Name="PostBuild" AfterTargets="PostBuildEvent">/,/<\/Target>/d' ReplayMod.csproj
+      - name: Build ReplayMod
         run: dotnet build --configuration ${{ inputs.configuration }} --output .build
       - uses: actions/upload-artifact@v4
         with:
-          name: RumbleAnimator-${{ inputs.configuration }}
-          path: .build/RumbleAnimator.dll
+          name: ReplayMod-${{ inputs.configuration }}
+          path: .build/ReplayMod.dll
           if-no-files-found: error

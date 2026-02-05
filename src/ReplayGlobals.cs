@@ -19,6 +19,8 @@ using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Players;
 using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppRUMBLE.Pools;
+using Il2CppRUMBLE.Social;
+using Il2CppRUMBLE.Social.Phone;
 using Il2CppSystem.Text;
 using Il2CppSystem.Text.RegularExpressions;
 using Il2CppTMPro;
@@ -328,7 +330,6 @@ public static class Utilities
         return GameObject.FindObjectsOfType<Pedestal>(true).Select(p => p.gameObject);
     }
     
-
     public static IEnumerator LoadMap(int index, float fadeDuration = 2f, Action onLoaded = null, float onLoadedDelay = 0.01f)
     {
         foreach (var structure in CombatManager.instance.structures.ToArray())
@@ -846,45 +847,219 @@ public static class ReplayFiles
 public static class ReplayPlaybackControls
 {
     public static bool playbackControlsOpen;
+    public static bool hideLocalPlayer = true;
+    
+    public static bool selectionInProgress;
+    public static Player selectedPlayer;
+    public static Dictionary<int, List<(UserData, Player)>> playerList = new();
+    public static int currentPlayerPage = 0;
 
+    public static GameObject slideOutPanel;
     public static GameObject playbackControls;
     public static GameObject timeline;
     public static TextMeshPro totalDuration;
     public static TextMeshPro currentDuration;
     public static TextMeshPro playbackTitle;
     public static TextMeshPro playbackSpeedText;
+    public static TextMeshPro pageNumberText;
+
+    public static Sprite pauseSprite;
+    public static Sprite playSprite;
+
+    public static DestroyOnPunch destroyOnPunch;
 
     public static GameObject markerPrefab;
     
-    public static void Open()
+    public static float smoothing = 7f;
+
+    public static void Update()
     {
-        if (playbackControlsOpen || Main.instance.head == null) return;
+        var head = Main.instance.head;
+        if (head == null || playbackControls == null || !(bool)Main.instance.PlaybackControlsFollow.SavedValue)
+            return;
 
-        playbackControlsOpen = true;
-    
-        bool grounded = Main.LocalPlayer.Controller.GetSubsystem<PlayerMovement>().IsGrounded();
-    
-        Vector3 position = Main.instance.head.position + Main.instance.head.forward * 0.6f - new Vector3(0, 0.1f, 0);
+        float armSpan = Main.LocalPlayer.Data.PlayerMeasurement.ArmSpan;
+        float distanceToPlayer = Vector3.Distance(playbackControls.transform.position, head.position);
 
-        Vector3 lookDir = Main.instance.head.position - position;
+        if (distanceToPlayer < armSpan)
+            return;
+
+        var (targetPos, targetRot) = GetTargetSlabTransform(head);
+
+        float proximityT = InverseLerp(armSpan, armSpan * 1.5f, distanceToPlayer);
+        float scaledT = (1f - Exp(-smoothing * Time.deltaTime)) * proximityT;
+
+        playbackControls.transform.position = Vector3.Lerp(playbackControls.transform.position, targetPos, scaledT);
+        playbackControls.transform.rotation = Quaternion.Slerp(playbackControls.transform.rotation, targetRot, scaledT);
+    }
+
+    public static (Vector3 position, Quaternion rotation) GetTargetSlabTransform(Transform head)
+    {
+        Vector3 forward = head.forward;
+        forward.y = 0f;
+        
+        Vector3 position = head.position + forward * 0.6f + Vector3.down * 0.1f;
+
+        Vector3 lookDir = head.position - position;
         lookDir.y = 0f;
 
         Quaternion rotation = Quaternion.LookRotation(lookDir);
-    
-        if (grounded)
+
+        return (position, rotation);
+    }
+
+    public static Dictionary<int, List<(UserData, Player)>> PaginateReplay(
+        ReplaySerializer.ReplayHeader header, 
+        Clone[] PlaybackPlayers, 
+        bool includeLocalPlayer = true
+    )
+    {
+        var allEntries = new List<(UserData, Player)>();
+
+        if (includeLocalPlayer)
         {
-            // TODO
-            // Add animation
-        
-            playbackControls.transform.position = position;
-            playbackControls.transform.rotation = rotation;
-            playbackControls.SetActive(true);
+            var local = Main.LocalPlayer;
+            allEntries.Add((
+                new UserData(
+                    PlatformManager.CurrentPlatform,
+                    local.Data.GeneralData.PlayFabMasterId,
+                    Guid.NewGuid().ToString(),
+                    $"You ({local.Data.GeneralData.PublicUsername})",
+                    local.Data.GeneralData.BattlePoints
+                ),
+                local
+            ));
         }
-        else
+
+        var players = header.Players;
+
+        for (int i = 0; i < players.Length; i++)
+        {
+            allEntries.Add((
+                new UserData(
+                    PlatformManager.Platform.Unknown,
+                     $"{players[i].MasterId}_{Guid.NewGuid().ToString()}",
+                    Guid.NewGuid().ToString(),
+                    players[i].Name,
+                    players[i].BattlePoints
+                ),
+                PlaybackPlayers[i].Controller.assignedPlayer
+            ));
+        }
+
+        var result = new Dictionary<int, List<(UserData, Player)>>();
+        int pageCount = CeilToInt(allEntries.Count / 4f);
+
+        for (int i = 0; i < pageCount; i++)
+        {
+            var page = new List<(UserData, Player)>();
+
+            for (int j = 0; j < 4; j++)
+            {
+                int index = i * 4 + j;
+                if (index >= allEntries.Count)
+                    break;
+
+                page.Add(allEntries[index]);
+            }
+
+            result[i] = page;
+        }
+
+        return result;
+    }
+
+    public static IEnumerator SelectPlayer(Action<Player> callback, float afterSelectionDelay)
+    {
+        if (selectionInProgress)
+            yield break;
+        
+        selectionInProgress = true;
+        selectedPlayer = null;
+
+        TogglePlayerSelection(true);
+
+        while (selectedPlayer == null && selectionInProgress)
+            yield return null;
+
+        yield return new WaitForSeconds(afterSelectionDelay);
+        
+        TogglePlayerSelection(false);
+        
+        callback?.Invoke(selectedPlayer);
+        selectionInProgress = false;
+    }
+
+    public static void TogglePlayerSelection(bool active)
+    {
+        slideOutPanel.SetActive(true);
+
+        if (active)
+            SelectPlayerPage(0);
+
+        if (!active)
+            selectionInProgress = false;
+        
+        AudioManager.instance.Play(ReplayCache.SFX[active ? "Call_Phone_ScreenUp" : "Call_Phone_ScreenDown"], slideOutPanel.transform.localPosition);
+
+        Vector3 position = active ? new Vector3(1.2833f, 0.5273f, 0.16f) : new Vector3(0.1709f, 0.5273f, 0.16f);
+        MelonCoroutines.Start(Utilities.LerpValue(
+            () => slideOutPanel.transform.localPosition,
+            v => slideOutPanel.transform.localPosition = v,
+            Vector3.Lerp,
+            position,
+            0.8f,
+            Utilities.EaseIn,
+            () => { if (!active) slideOutPanel.SetActive(false); }
+        ));
+    }
+
+    public static (UserData data, Player player) PlayerAtIndex(int index) 
+        => playerList.TryGetValue(currentPlayerPage, out var list) ? (index >= 0 && index < list.Count ? list[index] : (null, null)) : (null, null);
+
+    public static void SelectPlayerPage(int page)
+    {
+        int maxPage = Max(0, playerList.Count - 1);
+        currentPlayerPage = Clamp(page, 0, maxPage);
+
+        pageNumberText.text = $"{currentPlayerPage} / {playerList.Count}";
+        pageNumberText.ForceMeshUpdate();
+
+        var slabs = slideOutPanel.GetComponentsInChildren<PlayerTag>(true);
+        var usersOnPage = playerList.TryGetValue(currentPlayerPage, out var value) ? value : new List<(UserData, Player)>();
+
+        for (int i = 0; i < slabs.Length; i++)
+        {
+            if (i < usersOnPage.Count)
+            {
+                slabs[i].gameObject.SetActive(true);
+                slabs[i].Initialize(usersOnPage[i].Item1);
+            }
+            else
+            {
+                slabs[i].gameObject.SetActive(false);
+            }
+        }
+    }
+    
+    public static void Open()
+    {
+        if (Main.instance.head == null) return;
+
+        if (playbackControlsOpen)
+            playbackControls.SetActive(false);
+        
+        playbackControlsOpen = true;
+
+        var (position, rotation) = GetTargetSlabTransform(Main.instance.head);
+        
+        if (Main.LocalPlayer.Controller.GetSubsystem<PlayerMovement>().IsGrounded())
         {
             playbackControls.transform.position = position;
             playbackControls.transform.rotation = rotation;
             playbackControls.SetActive(true);
+
+            AudioManager.instance.Play(ReplayCache.SFX["Call_Slab_Construct"], Main.instance.head.position);
         }
     }
 
@@ -892,12 +1067,40 @@ public static class ReplayPlaybackControls
     {
         if (!playbackControlsOpen) return;
 
+        slideOutPanel.SetActive(false);
+        slideOutPanel.transform.localPosition = new Vector3(0.1709f, 0.5273f, 0.16f);
+        
         playbackControlsOpen = false;
     
-        // TODO
-        // Add animation
-    
         playbackControls.SetActive(false);
+        
+        AudioManager.instance.Play(ReplayCache.SFX["Call_Slab_Dismiss"], Main.instance.head.position);
+        PoolManager.instance.GetPool("DustBreak_VFX").FetchFromPool(playbackControls.transform.position, playbackControls.transform.rotation)
+            .transform.localScale = Vector3.one * 0.4f;
+    }
+}
+
+[RegisterTypeInIl2Cpp]
+public class DestroyOnPunch : MonoBehaviour
+{
+    public InteractionHand leftHand;
+    public InteractionHand rightHand;
+    public Action onDestroy;
+
+    public float punchThreshold = 3.0f;
+
+    public void OnTriggerEnter(Collider other)
+    {
+        
+        Vector3 velocity = Vector3.zero;
+
+        if (other.name.Contains("Bone_Pointer_C_L"))
+            velocity = leftHand.SampleVelocity(1);
+        else if (other.name.Contains("Bone_Pointer_C_R"))
+            velocity = rightHand.SampleVelocity(1);
+
+        if (velocity.magnitude > punchThreshold)
+            onDestroy?.Invoke();
     }
 }
 

@@ -20,20 +20,25 @@ the binary replay stream.
 
 The manifest JSON contains the following fields:
 
-- `Title` (string)
-- `CustomMap` (string)
-- `Version` (string)
-- `Scene` (string)
-- `Date` (string)
-- `Duration` (float)
-
-- `FrameCount` (int)
-- `PedestalCount` (int)
-- `FPS` (int)
-
-- `Players` (array)
-- `Structures` (array)
-- `Pedestals` (array)
+| Field         | Type            | Description                                                                            |
+|:--------------|:----------------|:---------------------------------------------------------------------------------------|
+| Title         | string          | User-visible replay name when file starts with 'Replay'                                |
+| CustomMap     | string          | Name of custom map, or custom map data if not base custom map, or empty string if none |
+| Version       | string          | Format version string (e.g. `"1.0.3"`)                                                 |
+| Scene         | string          | Scene name (e.g. `"Gym"`, `"Map0"`, `"Map1"`,`"Park"`)                                 |
+| Date          | string          | ISO 8601 timestamp (local) of recording start.                                         |
+| Duration      | float           | Total duration in seconds                                                              |
+| FrameCount    | int             | Number of recorded frames                                                              |
+| PedestalCount | int             | Number of pedestals recorded                                                           |
+| MarkerCount   | int             | Number of timeline markers recorded                                                    |
+| AvgPing       | int             | Average ping of local player (ms)                                                      |
+| MaxPing       | int             | Maximum recorded ping of local player (ms)                                             |
+| MinPing       | int             | Minimum recorded ping of local player (ms)                                             |
+| TargetFPS     | int             | Target recording framerate                                                             |
+| Players       | PlayerInfo[]    | List of players in the replay                                                          |
+| Structures    | StructureInfo[] | List of all structures recorded in the replay                                          |
+| Markers       | Marker[]        | List of timeline markers (manual or auto)                                              |
+| Guid          | string          | Unique identifier for the replay                                                       |
 
 Though the game does not always record exactly at what the stated FPS is.  
 I'd recommend using the `Time` value of each chunk compared to the static FPS number.
@@ -47,15 +52,20 @@ The order of this array defines the player indexing used throughout the replay.
 
 Each player object contains:
 
-- `ActorId` (byte)
-- `MasterId` (string)
-- `Name` (string)
-- `BattlePoints` (int)
-- `VisualData` (string)
-- `EquippedShiftStones` (array of 2 int16 values)
-- `Measurement.Length` (float)
-- `Measurement.ArmSpan` (float)
-- `WasHost` (bool)
+| Field               | Type     | Description                               |
+|---------------------|----------|-------------------------------------------|
+| ActorId             | byte     | Photon actor number for the player        |
+| MasterId            | string   | Player’s PlayFab master ID                |
+| Name                | string   | Player’s display name                     |
+| BattlePoints        | int      | Player battle points at time of recording |
+| VisualData          | string   | Cosmetic data string                      |
+| EquippedShiftStones | short[2] | IDs of equipped shiftstones               |
+| Measurement.Length  | float    | Player length measurement                 |
+| Measurement.ArmSpan | float    | Player arm span measurement               |
+| WasHost             | bool     | True if this player was the host          |
+
+
+
 
 ---
 
@@ -78,13 +88,6 @@ Defined structure types:
 - CagedBall
 - LargeRock
 - SmallRock
-
----
-
-### Pedestals
-`Pedestals` is an array defining the pedestals in match:
-- `pos` (Vector3)
-- `active` (bool)
 
 ---
 
@@ -178,15 +181,27 @@ Unknown fields must be skipped using `FieldSize`
 
 Structure state chunks describe the transform and status of a structure.
 
-Defined structure fields:
+| Field        | Type        | Description                                     |
+|--------------|-------------|-------------------------------------------------|
+| position     | Vector3     | World-space position of the structure           |
+| rotation     | Quaternion  | World-space rotation of the structure           |
+| active       | bool        | Whether the structure is currently active       |
+| grounded     | bool        | True if the structure is grounded               |
+| isFlicked    | bool        | True if the structure is currently flicked      |
+| isLeftHeld   | bool        | True if the structure is held by the left hand  |
+| isRightHeld  | bool        | True if the structure is held by the right hand |
+| currentState | byte (enum) | Current state                                   |
+| isTargetDisk | bool        | True if this structure is a target disk         |
 
-- `position` -> Vector3 (3 floats)
-- `rotation` -> Quaternion (4 floats)
-- `active` -> bool
-- `grounded` -> bool
-- `isHeld` -> bool
-- `isFlicked` -> bool
-- `isShaking` -> bool
+Structure States:
+
+- Default: Default structure state
+- Free: When the structure is *not* grounded and able to be moved freely
+- Frozen: The structure is in hitstop
+- FreeGrounded: Grounded movement during things like straight
+- StableGrounded: The structure is grounded
+- Float: The structure is parried
+- Normal: The structure can be moved freely
 
 ---
 
@@ -194,28 +209,89 @@ Defined structure fields:
 
 Player state chunks describe the pose and gameplay state of a player.
 
-Defined player fields:
-
-- `VRRigPos` -> Vector3
-- `VRRigRot` -> Quaternion
-- `LHandPos` -> Vector3
-- `LHandRot` -> Quaternion
-- `RHandPos` -> Vector3
-- `RHandRot` -> Quaternion
-- `HeadPos` -> Vector3
-- `HeadRot` -> Quaternion
-- `currentStack` -> int16
-- `Health` -> int16
-- `active` -> bool
+| Field       | Type       | Description                                  |
+|-------------|------------|----------------------------------------------|
+| VRRigPos    | Vector3    | Root player rig position                     |
+| VRRigRot    | Quaternion | Root player rig rotation                     |
+| LHandPos    | Vector3    | Left hand position                           |
+| LHandRot    | Quaternion | Left hand rotation                           |
+| RHandPos    | Vector3    | Right hand position                          |
+| RHandRot    | Quaternion | Right hand rotation                          |
+| HeadPos     | Vector3    | Headset position                             |
+| HeadRot     | Quaternion | Headset rotation                             |
+| Health      | int16      | Player’s current health                      |
+| active      | bool       | If the player is active in this frame        |
 
 ---
 
 ## PedestalState Chunks
 Pedestal state chunks describe the state of the pedestals in a match.
 
-Defined pedestal fields:
-- `position` -> Vector3
-- `active` -> bool
+| Field     | Type     | Description                                  |
+|-----------|----------|----------------------------------------------|
+| position  | Vector3  | World-space pedestal position                |
+| active    | bool     | Whether the pedestal is active in this frame |
+
+---
+
+## Event Chunks
+Event chunks represent discrete one-time actions in the current frame of the replay.  
+Unlike `PlayerState` or `StructureState` chunks, which describe continuous changes over time, events occur at a single moment and do not persist across frames.
+
+| Field       | Type       |
+|-------------|------------|
+| type        | byte       | 
+| position    | Vector3    | 
+| rotation    | Quaternion |
+| masterId    | string     | 
+| playerIndex | int        | 
+| markerType  | byte       | 
+| damage      | int        |
+| fxType      | byte       | 
+
+The event types, along with their corresponding fields, are as followed:
+- `Marker`
+  - `markerType`
+
+- `OneShotFX`
+  - `position`
+  - `rotation`
+  - `fxType`
+
+Event types do not write to other fields.
+
+### Marker Type
+| Value        | Description                          |
+|--------------|--------------------------------------|
+| None         | No marker                            |
+| Manual       | Player-placed manual marker          |
+| RoundEnd     | Marker indicating the end of a round |
+| MatchEnd     | Marker indicating the end of a match |
+| LargeDamage  | Marker for a large damage event      |
+
+### FX One Shot Type
+
+| Value              | Description                                  |
+|--------------------|----------------------------------------------|
+| None               | No effect                                    |
+| StructureCollision | Structure collided with another structure    |
+| Ricochet           | Structure slid against another structure     |
+| Grounded           | Structure became grounded                    |
+| GroundedSFX        | Grounded sound effect trigger                |
+| Ungrounded         | Structure became ungrounded                  |
+| DustImpact         | Structure broke                              |
+| ImpactLight        | Light impact effect                          |
+| ImpactMedium       | Medium impact effect                         |
+| ImpactHeavy        | Heavy impact effect                          |
+| ImpactMassive      | Very heavy impact effect                     |
+| Spawn              | Structure spawn effect                       |
+| Break              | Structure break effect                       |
+| BreakDisc          | Disc break effect                            |
+| RockCamSpawn       | RockCam camera spawn effect                  |
+| RockCamDespawn     | RockCam camera despawn effect                |
+| RockCamStick       | RockCam stick effect                         |
+| Fistbump           | Fistbump effect                              |
+| FistbumpGoin       | Extra Gear Coin gained at the end of a match |
 
 ---
 

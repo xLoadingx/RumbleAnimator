@@ -963,14 +963,10 @@ public class Main : MelonMod
         compplay.enabled = true;
         compplay.onPressed.RemoveAllListeners();
         
-        var playButtonSprite = compplay.transform.GetChild(3).GetChild(0).GetComponent<Image>();
-        ReplayPlaybackControls.playSprite = playButtonSprite.sprite;
+        ReplayPlaybackControls.playButtonSprite = compplay.transform.GetChild(3).GetChild(0).GetComponent<Image>();
+        ReplayPlaybackControls.playSprite = ReplayPlaybackControls.playButtonSprite.sprite;
         
-        compplay.onPressed.AddListener((UnityAction)(() =>
-        {
-            TogglePlayback(isPaused);
-            playButtonSprite.sprite = !isPaused ? ReplayPlaybackControls.pauseSprite : ReplayPlaybackControls.playSprite;
-        }));
+        compplay.onPressed.AddListener((UnityAction)(() => { TogglePlayback(isPaused); }));
 
         playButton.name = "Play Button";
         playButton.transform.localScale = Vector3.one * 2f;
@@ -985,8 +981,8 @@ public class Main : MelonMod
             100f
         );
 
-        playButtonSprite.sprite = ReplayPlaybackControls.pauseSprite;
-        playButtonSprite.transform.localScale = Vector3.one * 0.8f;
+        ReplayPlaybackControls.playButtonSprite.sprite = ReplayPlaybackControls.pauseSprite;
+        ReplayPlaybackControls.playButtonSprite.transform.localScale = Vector3.one * 0.8f;
 
         var stopReplayButton = GameObject.Instantiate(Calls.GameObjects.Gym.LOGIC.DressingRoom.Controlpanel.Controls.Frameattachment.RotationOptions.ResetRotationButton.GetGameObject(),
             playbackControls.transform.GetChild(1));
@@ -2779,6 +2775,8 @@ public class Main : MelonMod
         if (!active && isPaused) return;
 
         isPaused = !active;
+        
+        ReplayPlaybackControls.playButtonSprite.sprite = !isPaused ? ReplayPlaybackControls.pauseSprite : ReplayPlaybackControls.playSprite;
 
         if (active)
         {

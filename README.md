@@ -46,8 +46,8 @@ Holding the Crystalize button on the side of the Replay Table will turn the curr
 ---
 
 ### Playback Controls
-While a replay is playing, you can open the playback panel by doing the following gesture:
-
+While a replay is playing, you can toggle the playback panel by doing the following gesture:  
+![Playback Controls Gesture](PlaybackControlsGesture.png)  
 This opens a control menu with:
 - A timeline that shows current time and total duration
 - You can scrub through the replay by dragging your finger along the timeline
@@ -56,6 +56,11 @@ This opens a control menu with:
 - Play / Pause toggle
 - Stop replay
 - Exit scene
+
+This panel can also be punched to toggle it off.
+
+Alternatively, you can also do this gesture to toggle pause:  
+![Pause Gesture](PauseGesture.png)
 
 ---
 

@@ -29,6 +29,7 @@ using MelonLoader.Utils;
 using Newtonsoft.Json;
 using RumbleModdingAPI;
 using UnityEngine;
+using UnityEngine.UI;
 using UnityEngine.VFX;
 using static UnityEngine.Mathf;
 using Random = UnityEngine.Random;
@@ -863,6 +864,7 @@ public static class ReplayPlaybackControls
     public static TextMeshPro playbackSpeedText;
     public static TextMeshPro pageNumberText;
 
+    public static Image playButtonSprite;
     public static Sprite pauseSprite;
     public static Sprite playSprite;
 

@@ -1,44 +1,91 @@
 # Rumble Animator
-Rumble Animator is a replay and animation system for RUMBLE VR that records scenes into a Brotli-compressed binary format and allows them to be replayed in-game.
+Rumble Animator is a replay and animation system for RUMBLE VR. It records gameplay into a Brotli-compressed binary format and allows replays to be viewed in-game.
 
-It is primarily intended for:
+It can be used for:
 - Match analysis
 - Animation and cinematic capture
 - Debugging gameplay behavior
-- External tooling (via the replay format)
+- External analysis or tooling using the provided replay format
 
 ---
 
 ## How to use
 ### Recording
-- To record automatically, enable Auto Record Matches or Auto Record Parks in the mod settings.
-- To record manually, you can hold the custom hand gesture below for 3 seconds. You will here a clicking sound:  
+You can start recording in two ways:  
+- **Automatic**: Enable `Auto Record Matches` or `Auto Record Parks` in the mod settings.
+- **Manual**: Hold the custom hand gesture for 3 seconds. You'll hear a clicking sound along with a corresponding VFX when a recording starts.  
 ![HandGesture](CustomGesture.png)
-- You can also do this same hand gesture again to stop and save the recording.
 
-### Playback
-While a replay is playing, you can do the above hand gesture **but** with both triggers held down  
-This brings up a control menu.
+Doing the gesture again will stop and save the recording.
+
+---
 
 ### Replay Buffer
-If the Replay Buffer is enabled
-- The mod continuously stores the last N seconds of gameplay (you can configure the duration).
-- To save the buffer, press both buttons on the controller side you've chosen
+If enabled, the replay bufffer continuously records the last few seconds of gameplay.
+- The duration of the buffer can be configured in the mod settings.
+- To save the current buffer, press both buttons on the controller side you've selected.
+- A pop sound and a haptic vibration (if enabled) will play when saved.
 
-When a replay is finished saving, you'll hear a little pop sound.  
-If you have haptics enabled, you'll also feel a small vibration in your controller.
+---
 
-### The Replay Table
-You will find the Replay Table near the region selector in Gym. You can press the left and right arrow buttons to scroll through your stored replays.  
-Holding the button below the name of the replay will load you into the replay in it's specific map.
+### Replay Table
+The Replay Table appears near the region selector in Gym.
+- Use the left/right arrows to scrool through saved replays.
+- Hold the Load button under the replay name to load into it's map and view the replay.
+- Replay names and metadata display according to the formats defined in:
+  - `UserData/ReplayMod/Settings/MetadataFormats`
+  - `UserData/ReplayMod/Settings/AutoNameFormats/`
 
-The info that is shown when a replay is selected is based off of your format inside of `UserData/MatchReplays/MetadataFormats/`
-There are separate formats for Gym, Park, and Matches. This uses a tag-based system for naming. The tags are provided inside the file.
+These use tag-based templates. Tags are documented in the files themselves.
 
-The auto-naming configs inside of `UserData/MatchReplays/AutoNameFormats` also uses the same tag-based system. This will be the name that replays show on the Replay Table.
+### Crystals
+Holding the Crystalize button on the side of the Replay Table will turn the currently selected replay into a physical crystal
+- Crystals can be held and placed anywhere in the Gym.
+- Throwing a crystal back onto the table will select the replay it contains.
 
-The button on the side of the table is the Crystalize button. Holding this button will put the replay into a crystal, which can be put anywhere around the gym.  
-To load back the replay using these crystals, you can put (or throw) it back on top of the table. It will then be read and show the replay it had stored.
+---
+
+### Playback Controls
+While a replay is playing, you can open the playback panel by doing the following gesture:
+
+This opens a control menu with:
+- A timeline that shows current time and total duration
+- You can scrub through the replay by dragging your finger along the timeline
+- Playback speed controls:
+  - `+0.1`, `-0.1`, `+0.1`, `+1`
+- Play / Pause toggle
+- Stop replay
+- Exit scene
+
+---
+
+### Timeline Markers
+The timeline will show markers at key moments. These markers can be toggled individually in the mod settings:
+- Red: Large Damage
+- Black: Match Ended
+- Purple: Round Ended
+- White: Manual Marker
+
+---
+
+### POV Mode
+You can view the replay from any recorded player's perspective:
+- Tap the POV button on the Playback Controls to open the player selector.
+- A slide-out panel will appear with a list of players
+- Tap a player to switch to their perspective
+
+You can also toggle Hide Local Player to remove your avatar while viewing through a player's POV.  
+The legacy camera must be enabled for POV mode to work.
+
+---
+
+### Replay Settings Panel
+Once a replay is selected, a second panel appears with tools for managing the file:
+- Timeline and duration display
+- The timeline here also can be dragged with your finger when the replay is loaded
+- Rename button (with keyboard input)
+- Copy path button
+- Delete button
 
 ---
 

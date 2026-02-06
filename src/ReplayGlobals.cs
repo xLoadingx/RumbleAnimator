@@ -848,21 +848,13 @@ public static class ReplayFiles
 public static class ReplayPlaybackControls
 {
     public static bool playbackControlsOpen;
-    public static bool hideLocalPlayer = true;
-    
-    public static bool selectionInProgress;
-    public static Player selectedPlayer;
-    public static Dictionary<int, List<(UserData, Player)>> playerList = new();
-    public static int currentPlayerPage = 0;
 
-    public static GameObject slideOutPanel;
     public static GameObject playbackControls;
     public static GameObject timeline;
     public static TextMeshPro totalDuration;
     public static TextMeshPro currentDuration;
     public static TextMeshPro playbackTitle;
     public static TextMeshPro playbackSpeedText;
-    public static TextMeshPro pageNumberText;
 
     public static Image playButtonSprite;
     public static Sprite pauseSprite;
@@ -909,140 +901,6 @@ public static class ReplayPlaybackControls
 
         return (position, rotation);
     }
-
-    public static Dictionary<int, List<(UserData, Player)>> PaginateReplay(
-        ReplaySerializer.ReplayHeader header, 
-        Clone[] PlaybackPlayers, 
-        bool includeLocalPlayer = true
-    )
-    {
-        var allEntries = new List<(UserData, Player)>();
-
-        if (includeLocalPlayer)
-        {
-            var local = Main.LocalPlayer;
-            allEntries.Add((
-                new UserData(
-                    PlatformManager.CurrentPlatform,
-                    local.Data.GeneralData.PlayFabMasterId,
-                    Guid.NewGuid().ToString(),
-                    $"You ({local.Data.GeneralData.PublicUsername})",
-                    local.Data.GeneralData.BattlePoints
-                ),
-                local
-            ));
-        }
-
-        var players = header.Players;
-
-        for (int i = 0; i < players.Length; i++)
-        {
-            allEntries.Add((
-                new UserData(
-                    PlatformManager.Platform.Unknown,
-                     $"{players[i].MasterId}_{Guid.NewGuid().ToString()}",
-                    Guid.NewGuid().ToString(),
-                    players[i].Name,
-                    players[i].BattlePoints
-                ),
-                PlaybackPlayers[i].Controller.assignedPlayer
-            ));
-        }
-
-        var result = new Dictionary<int, List<(UserData, Player)>>();
-        int pageCount = CeilToInt(allEntries.Count / 4f);
-
-        for (int i = 0; i < pageCount; i++)
-        {
-            var page = new List<(UserData, Player)>();
-
-            for (int j = 0; j < 4; j++)
-            {
-                int index = i * 4 + j;
-                if (index >= allEntries.Count)
-                    break;
-
-                page.Add(allEntries[index]);
-            }
-
-            result[i] = page;
-        }
-
-        return result;
-    }
-
-    public static IEnumerator SelectPlayer(Action<Player> callback, float afterSelectionDelay)
-    {
-        if (selectionInProgress)
-            yield break;
-        
-        selectionInProgress = true;
-        selectedPlayer = null;
-
-        TogglePlayerSelection(true);
-
-        while (selectedPlayer == null && selectionInProgress)
-            yield return null;
-
-        yield return new WaitForSeconds(afterSelectionDelay);
-        
-        TogglePlayerSelection(false);
-        
-        callback?.Invoke(selectedPlayer);
-        selectionInProgress = false;
-    }
-
-    public static void TogglePlayerSelection(bool active)
-    {
-        slideOutPanel.SetActive(true);
-
-        if (active)
-            SelectPlayerPage(0);
-
-        if (!active)
-            selectionInProgress = false;
-        
-        AudioManager.instance.Play(ReplayCache.SFX[active ? "Call_Phone_ScreenUp" : "Call_Phone_ScreenDown"], slideOutPanel.transform.localPosition);
-
-        Vector3 position = active ? new Vector3(1.2833f, 0.5273f, 0.16f) : new Vector3(0.1709f, 0.5273f, 0.16f);
-        MelonCoroutines.Start(Utilities.LerpValue(
-            () => slideOutPanel.transform.localPosition,
-            v => slideOutPanel.transform.localPosition = v,
-            Vector3.Lerp,
-            position,
-            0.8f,
-            Utilities.EaseIn,
-            () => { if (!active) slideOutPanel.SetActive(false); }
-        ));
-    }
-
-    public static (UserData data, Player player) PlayerAtIndex(int index) 
-        => playerList.TryGetValue(currentPlayerPage, out var list) ? (index >= 0 && index < list.Count ? list[index] : (null, null)) : (null, null);
-
-    public static void SelectPlayerPage(int page)
-    {
-        int maxPage = Max(0, playerList.Count - 1);
-        currentPlayerPage = Clamp(page, 0, maxPage);
-
-        pageNumberText.text = $"{currentPlayerPage} / {playerList.Count}";
-        pageNumberText.ForceMeshUpdate();
-
-        var slabs = slideOutPanel.GetComponentsInChildren<PlayerTag>(true);
-        var usersOnPage = playerList.TryGetValue(currentPlayerPage, out var value) ? value : new List<(UserData, Player)>();
-
-        for (int i = 0; i < slabs.Length; i++)
-        {
-            if (i < usersOnPage.Count)
-            {
-                slabs[i].gameObject.SetActive(true);
-                slabs[i].Initialize(usersOnPage[i].Item1);
-            }
-            else
-            {
-                slabs[i].gameObject.SetActive(false);
-            }
-        }
-    }
     
     public static void Open()
     {
@@ -1068,9 +926,6 @@ public static class ReplayPlaybackControls
     public static void Close()
     {
         if (!playbackControlsOpen) return;
-
-        slideOutPanel.SetActive(false);
-        slideOutPanel.transform.localPosition = new Vector3(0.1709f, 0.5273f, 0.16f);
         
         playbackControlsOpen = false;
     
@@ -1120,6 +975,19 @@ public class ReplaySettings : MonoBehaviour
     public static InteractionButton renameButton;
     public static InteractionButton deleteButton;
     public static InteractionButton copyPathButton;
+    
+    public static bool hideLocalPlayer = true;
+    public static TextMeshPro pageNumberText;
+    
+    public static bool selectionInProgress;
+    public static Player selectedPlayer;
+    public static Dictionary<int, List<(UserData, Player)>> playerList = new();
+    public static int currentPlayerPage = 0;
+
+    public static GameObject povButton;
+    public static GameObject hideLocalPlayerToggle;
+
+    public static GameObject slideOutPanel;
 
     public static GameObject timeline;
 
@@ -1129,6 +997,9 @@ public class ReplaySettings : MonoBehaviour
 
     public void Show(string path)
     {
+        povButton.SetActive(Main.isPlaying);
+        hideLocalPlayerToggle.SetActive(Main.isPlaying);
+        
         currentPath = path;
         currentHeader = ReplaySerializer.GetManifest(path);
 
@@ -1142,6 +1013,9 @@ public class ReplaySettings : MonoBehaviour
 
         dateText.text = ReplaySerializer.FormatReplayString("{DateTime:yyyy/MM/dd hh:mm tt}", currentHeader);
         dateText.ForceMeshUpdate();
+        
+        slideOutPanel.SetActive(false);
+        slideOutPanel.transform.localPosition = new Vector3(0.1709f, 0.5273f, 0.16f);
 
         timeline.transform.GetChild(0).GetComponent<TimelineScrubber>().header = currentHeader;
         timeline.GetComponent<MeshRenderer>().material.SetFloat("_BP_Target", currentHeader.Duration * 1000f);
@@ -1254,6 +1128,140 @@ public class ReplaySettings : MonoBehaviour
         Show(currentPath);
 
         AudioManager.instance.Play(ReplayCache.SFX["Call_PoseGhost_MovePerformed"], transform.position);
+    }
+    
+        public static Dictionary<int, List<(UserData, Player)>> PaginateReplay(
+        ReplaySerializer.ReplayHeader header, 
+        Clone[] PlaybackPlayers, 
+        bool includeLocalPlayer = true
+    )
+    {
+        var allEntries = new List<(UserData, Player)>();
+
+        if (includeLocalPlayer)
+        {
+            var local = Main.LocalPlayer;
+            allEntries.Add((
+                new UserData(
+                    PlatformManager.CurrentPlatform,
+                    local.Data.GeneralData.PlayFabMasterId,
+                    Guid.NewGuid().ToString(),
+                    $"You ({local.Data.GeneralData.PublicUsername})",
+                    local.Data.GeneralData.BattlePoints
+                ),
+                local
+            ));
+        }
+
+        var players = header.Players;
+
+        for (int i = 0; i < players.Length; i++)
+        {
+            allEntries.Add((
+                new UserData(
+                    PlatformManager.Platform.Unknown,
+                     $"{players[i].MasterId}_{Guid.NewGuid().ToString()}",
+                    Guid.NewGuid().ToString(),
+                    players[i].Name,
+                    players[i].BattlePoints
+                ),
+                PlaybackPlayers[i].Controller.assignedPlayer
+            ));
+        }
+
+        var result = new Dictionary<int, List<(UserData, Player)>>();
+        int pageCount = CeilToInt(allEntries.Count / 4f);
+
+        for (int i = 0; i < pageCount; i++)
+        {
+            var page = new List<(UserData, Player)>();
+
+            for (int j = 0; j < 4; j++)
+            {
+                int index = i * 4 + j;
+                if (index >= allEntries.Count)
+                    break;
+
+                page.Add(allEntries[index]);
+            }
+
+            result[i] = page;
+        }
+
+        return result;
+    }
+
+    public static IEnumerator SelectPlayer(Action<Player> callback, float afterSelectionDelay)
+    {
+        if (selectionInProgress)
+            yield break;
+        
+        selectionInProgress = true;
+        selectedPlayer = null;
+
+        TogglePlayerSelection(true);
+
+        while (selectedPlayer == null && selectionInProgress)
+            yield return null;
+
+        yield return new WaitForSeconds(afterSelectionDelay);
+        
+        TogglePlayerSelection(false);
+        
+        callback?.Invoke(selectedPlayer);
+        selectionInProgress = false;
+    }
+
+    public static void TogglePlayerSelection(bool active)
+    {
+        slideOutPanel.SetActive(true);
+
+        if (active)
+            SelectPlayerPage(0);
+
+        if (!active)
+            selectionInProgress = false;
+        
+        AudioManager.instance.Play(ReplayCache.SFX[active ? "Call_Phone_ScreenUp" : "Call_Phone_ScreenDown"], slideOutPanel.transform.localPosition);
+
+        Vector3 position = active ? new Vector3(-1.1906f, 0.5273f, 0.16f) : new Vector3(-0.1288f, 0.5273f, 0.16f);
+        MelonCoroutines.Start(Utilities.LerpValue(
+            () => slideOutPanel.transform.localPosition,
+            v => slideOutPanel.transform.localPosition = v,
+            Vector3.Lerp,
+            position,
+            0.8f,
+            Utilities.EaseIn,
+            () => { if (!active) slideOutPanel.SetActive(false); }
+        ));
+    }
+
+    public static (UserData data, Player player) PlayerAtIndex(int index) 
+        => playerList.TryGetValue(currentPlayerPage, out var list) ? (index >= 0 && index < list.Count ? list[index] : (null, null)) : (null, null);
+
+    public static void SelectPlayerPage(int page)
+    {
+        int maxPage = Max(0, playerList.Count - 1);
+        currentPlayerPage = Clamp(page, 0, maxPage);
+
+        pageNumberText.text = $"{currentPlayerPage + (playerList.Count == 0 ? 0 : 1)} / {playerList.Count}";
+        pageNumberText.ForceMeshUpdate();
+
+        var slabs = slideOutPanel.GetComponentsInChildren<PlayerTag>(true);
+        var usersOnPage = playerList.TryGetValue(currentPlayerPage, out var value) ? value : new List<(UserData, Player)>();
+
+        for (int i = 0; i < slabs.Length; i++)
+        {
+            if (i < usersOnPage.Count)
+            {
+                slabs[i].gameObject.SetActive(true);
+                slabs[i].Initialize(usersOnPage[i].Item1);
+            }
+            else
+            {
+                slabs[i].gameObject.SetActive(false);
+            }
+        }
     }
 }
 

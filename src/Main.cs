@@ -8,6 +8,7 @@ using Il2CppRUMBLE.Combat.ShiftStones;
 using Il2CppRUMBLE.Environment;
 using Il2CppRUMBLE.Environment.MatchFlow;
 using Il2CppRUMBLE.Input;
+using Il2CppRUMBLE.Integrations.LIV;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Networking;
@@ -27,6 +28,7 @@ using RumbleModUI;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.InputSystem.XR;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
 using UnityEngine.VFX;
 using static UnityEngine.Mathf;
@@ -129,6 +131,8 @@ public class Main : MelonMod
     public Clone[] PlaybackPlayers;
     public PlaybackPlayerState[] playbackPlayerStates;
     public Player povPlayer;
+
+    public GameObject highlightMaterial;
 
     // Pedestals
     public List<GameObject> replayPedestals = new();
@@ -1018,29 +1022,64 @@ public class Main : MelonMod
         exitSceneTMP.text = "Exit Scene";
         exitSceneTMP.color = new Color(0.8f, 0, 0);
         exitSceneTMP.ForceMeshUpdate();
+
+        var markerPrefab = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        markerPrefab.name = "ReplayMarker";
+        markerPrefab.SetActive(false);
+        
+        var markerRenderer = markerPrefab.GetComponent<MeshRenderer>();
+        markerRenderer.material = new Material(Shader.Find("Shader Graphs/RUMBLE_Prop"));
+
+        var highlightMat = bundle.LoadAsset<Material>("Ghost");
+        highlightMaterial = new GameObject("HighlightMaterial");
+        highlightMaterial.AddComponent<MeshRenderer>().sharedMaterial = highlightMat;
+        GameObject.DontDestroyOnLoad(highlightMaterial);
+
+        ReplayPlaybackControls.playbackControls = playbackControls;
+        ReplayPlaybackControls.markerPrefab = markerPrefab;
+        ReplayPlaybackControls.timeline = timeline;
+        ReplayPlaybackControls.currentDuration = currentDuration;
+        ReplayPlaybackControls.totalDuration = totalDuration;
+        ReplayPlaybackControls.playbackSpeedText = playbackSpeedText;
+        ReplayPlaybackControls.playbackTitle = playbackTitle;
+        ReplayPlaybackControls.destroyOnPunch = destroyOnPunchComp;
+        
+        // Replay Settings
+        var replaySettingsPanel = GameObject.Instantiate(playbackControls, ReplayTable.transform);
+        GameObject.Destroy(replaySettingsPanel.transform.GetChild(6).gameObject);
+        replaySettingsPanel.name = "Replay Settings";
+        replaySettingsPanel.transform.localScale = Vector3.one;
+        replaySettingsPanel.transform.GetChild(0).GetChild(0).gameObject.layer = LayerMask.NameToLayer("Default");
+        
+        for (int i = 0; i < replaySettingsPanel.transform.GetChild(1).childCount; i++)
+            GameObject.Destroy(replaySettingsPanel.transform.GetChild(1).GetChild(i).gameObject);
+
+        replaySettingsPanel.transform.localPosition = new Vector3(0.3782f, 0.88f, 0.1564f);
+        replaySettingsPanel.transform.localRotation = Quaternion.Euler(34.4376f, 90, 90);
         
         var povCameraButton = GameObject.Instantiate(
             Calls.GameObjects.Gym.LOGIC.DressingRoom.Controlpanel.Controls.Frameattachment.Viewoptions.ResetFighterButton.GetGameObject(),
-            playbackControls.transform.GetChild(1)
+            replaySettingsPanel.transform.GetChild(1)
         );
 
         povCameraButton.name = "POV Button";
-        povCameraButton.transform.localPosition = new Vector3(-0.428f, 0.3233f, -0.0127f);
+        povCameraButton.transform.localPosition = new Vector3(-0.4193f, 0.0749f, -0.0164f);
         povCameraButton.transform.localRotation = Quaternion.identity;
         povCameraButton.transform.localScale = Vector3.one * 2f;
         
         var povCameraButtonComp = povCameraButton.transform.GetChild(0).GetComponent<InteractionButton>();
         povCameraButtonComp.enabled = true;
         povCameraButtonComp.useLongPress = false;
+        povCameraButtonComp.onPressedAudioCall = ReplayCache.SFX["Call_GearMarket_GenericButton_Press"];
         povCameraButtonComp.onPressed.RemoveAllListeners();
         povCameraButtonComp.onPressed.AddListener((UnityAction)(() =>
         {
             
             if (Calls.GameObjects.DDOL.GameInstance.Initializable.RecordingCamera.GetGameObject().GetComponent<Camera>().enabled)
             {
-                MelonCoroutines.Start(ReplayPlaybackControls.SelectPlayer(selectedPlayer =>
+                MelonCoroutines.Start(ReplaySettings.SelectPlayer(selectedPlayer =>
                 {
-                    UpdateReplayCameraPOV(selectedPlayer, ReplayPlaybackControls.hideLocalPlayer);
+                    UpdateReplayCameraPOV(selectedPlayer, ReplaySettings.hideLocalPlayer);
                 }, 0.5f));
             }
             else
@@ -1051,11 +1090,11 @@ public class Main : MelonMod
 
         var hideLocalPlayerButton = GameObject.Instantiate(
             Calls.GameObjects.Gym.LOGIC.DressingRoom.Controlpanel.Controls.Frameattachment.RotationOptions.ResetRotationButton.GetGameObject(), 
-            playbackControls.transform.GetChild(1)
+            replaySettingsPanel.transform.GetChild(1)
         );
 
         hideLocalPlayerButton.name = "Hide Local Player Toggle";
-        hideLocalPlayerButton.transform.localPosition = new Vector3(-0.4028f, 0.1333f, -0.004f);
+        hideLocalPlayerButton.transform.localPosition = new Vector3(-0.394f, -0.1135f, -0.00116f);
         hideLocalPlayerButton.transform.localRotation = Quaternion.identity;
         hideLocalPlayerButton.transform.localScale = Vector3.one * 1.6f;
         
@@ -1071,7 +1110,7 @@ public class Main : MelonMod
         hideLocalPlayerComp.onPressed.RemoveAllListeners();
         hideLocalPlayerComp.onToggleStateChanged.AddListener((UnityAction<bool>)(toggle =>
         {
-            ReplayPlaybackControls.hideLocalPlayer = toggle;
+            ReplaySettings.hideLocalPlayer = toggle;
             hideLocalPlayerTMP.color = toggle ? Color.green : Color.red;
 
             if (povPlayer != null)
@@ -1093,11 +1132,11 @@ public class Main : MelonMod
             100f
         );
 
-        var slideOutPanel = GameObject.Instantiate(bundle.LoadAsset<GameObject>("SlideOutPlayerSelector"), playbackControls.transform.GetChild(1));
+        var slideOutPanel = GameObject.Instantiate(bundle.LoadAsset<GameObject>("SlideOutPlayerSelector"), replaySettingsPanel.transform.GetChild(1));
 
         slideOutPanel.name = "Player Selector Panel";
         slideOutPanel.transform.localScale = Vector3.one * 2.5f;
-        slideOutPanel.transform.localPosition = new Vector3(0.1709f, 0.5273f, 0.16f);
+        slideOutPanel.transform.localPosition = new Vector3(0.1996f, 0.5273f, 0.16f);
         slideOutPanel.SetActive(false);
 
         var slideOutText = Calls.Create.NewText();
@@ -1130,7 +1169,7 @@ public class Main : MelonMod
 
             var button = playerTag.transform.GetChild(0).GetComponent<InteractionButton>();
             button.onPressed.RemoveAllListeners();
-            button.onPressed.AddListener((UnityAction)(() => { ReplayPlaybackControls.selectedPlayer = ReplayPlaybackControls.PlayerAtIndex(index).player; }));
+            button.onPressed.AddListener((UnityAction)(() => { ReplaySettings.selectedPlayer = ReplaySettings.PlayerAtIndex(index).player; }));
         }
 
         var nextPageButton = GameObject.Instantiate(playButton, slideOutPanel.transform);
@@ -1145,7 +1184,7 @@ public class Main : MelonMod
         nextPageButtonComp.onPressed.RemoveAllListeners();
         nextPageButtonComp.onPressed.AddListener((UnityAction)(() =>
         {
-            ReplayPlaybackControls.SelectPlayerPage(ReplayPlaybackControls.currentPlayerPage + 1);
+            ReplaySettings.SelectPlayerPage(ReplaySettings.currentPlayerPage + 1);
         }));
         
         var previousPageButton = GameObject.Instantiate(playButton, slideOutPanel.transform);
@@ -1160,7 +1199,7 @@ public class Main : MelonMod
         previousPageButtonComp.onPressed.RemoveAllListeners();
         previousPageButtonComp.onPressed.AddListener((UnityAction)(() =>
         {
-            ReplayPlaybackControls.SelectPlayerPage(ReplayPlaybackControls.currentPlayerPage - 1);
+            ReplaySettings.SelectPlayerPage(ReplaySettings.currentPlayerPage - 1);
         }));
 
         var pageNumberText = Calls.Create.NewText();
@@ -1176,37 +1215,6 @@ public class Main : MelonMod
         pageNumberTextComp.color = Color.white;
         pageNumberTextComp.horizontalAlignment = HorizontalAlignmentOptions.Center;
         pageNumberTextComp.ForceMeshUpdate();
-
-    var markerPrefab = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        markerPrefab.name = "ReplayMarker";
-        markerPrefab.SetActive(false);
-        
-        var markerRenderer = markerPrefab.GetComponent<MeshRenderer>();
-        markerRenderer.material = new Material(Shader.Find("Shader Graphs/RUMBLE_Prop"));
-
-        ReplayPlaybackControls.playbackControls = playbackControls;
-        ReplayPlaybackControls.markerPrefab = markerPrefab;
-        ReplayPlaybackControls.timeline = timeline;
-        ReplayPlaybackControls.currentDuration = currentDuration;
-        ReplayPlaybackControls.totalDuration = totalDuration;
-        ReplayPlaybackControls.playbackSpeedText = playbackSpeedText;
-        ReplayPlaybackControls.playbackTitle = playbackTitle;
-        ReplayPlaybackControls.destroyOnPunch = destroyOnPunchComp;
-        ReplayPlaybackControls.slideOutPanel = slideOutPanel;
-        ReplayPlaybackControls.pageNumberText = pageNumberTextComp;
-        
-        // Replay Settings
-        var replaySettingsPanel = GameObject.Instantiate(playbackControls, ReplayTable.transform);
-        GameObject.Destroy(replaySettingsPanel.transform.GetChild(6).gameObject);
-        replaySettingsPanel.name = "Replay Settings";
-        replaySettingsPanel.transform.localScale = Vector3.one;
-        replaySettingsPanel.transform.GetChild(0).GetChild(0).gameObject.layer = LayerMask.NameToLayer("Default");
-        
-        for (int i = 0; i < replaySettingsPanel.transform.GetChild(1).childCount; i++)
-            GameObject.Destroy(replaySettingsPanel.transform.GetChild(1).GetChild(i).gameObject);
-
-        replaySettingsPanel.transform.localPosition = new Vector3(0.3782f, 0.88f, 0.1564f);
-        replaySettingsPanel.transform.localRotation = Quaternion.Euler(34.4376f, 90, 90);
         
         var timelineRS = GameObject.Instantiate(timeline, replaySettingsPanel.transform.GetChild(1));
         timelineRS.name = "Timeline";
@@ -1283,7 +1291,7 @@ public class Main : MelonMod
 
         var renameInstructions = GameObject.Instantiate(dateText, replaySettingsPanel.transform.GetChild(1));
         renameInstructions.name = "Rename Instructions";
-        renameInstructions.transform.localPosition = new Vector3(0, 0.2061f, 0);
+        renameInstructions.transform.localPosition = new Vector3(0, 0.3156f, 0);
         renameInstructions.transform.localScale = Vector3.one;
         renameInstructions.SetActive(false);
         
@@ -1364,6 +1372,10 @@ public class Main : MelonMod
         ReplaySettings.renameButton = renameButtonComp;
         ReplaySettings.timeline = timelineRS;
         ReplaySettings.durationComp = durationRS;
+        ReplaySettings.slideOutPanel = slideOutPanel;
+        ReplaySettings.pageNumberText = pageNumberTextComp;
+        ReplaySettings.povButton = povCameraButton;
+        ReplaySettings.hideLocalPlayerToggle = hideLocalPlayerButton;
         
         GameObject.DontDestroyOnLoad(ReplayTable);
         GameObject.DontDestroyOnLoad(crystalPrefab);
@@ -1808,6 +1820,7 @@ public class Main : MelonMod
         currentReplay = ReplaySerializer.LoadReplay(path);
 
         SetPlaybackSpeed(1f);
+        TogglePlayback(true);
         
         ReplayRoot = new GameObject("Replay Root");
         pedestalsParent = new GameObject("Pedestals");
@@ -1987,8 +2000,10 @@ public class Main : MelonMod
             ? currentReplay.Header.Title 
             : Path.GetFileNameWithoutExtension(path);
 
-        ReplayPlaybackControls.playerList = ReplayPlaybackControls.PaginateReplay(currentReplay.Header, PlaybackPlayers);
-        ReplayPlaybackControls.SelectPlayerPage(0);
+        ReplaySettings.playerList = ReplaySettings.PaginateReplay(currentReplay.Header, PlaybackPlayers);
+        ReplaySettings.SelectPlayerPage(0);
+        ReplaySettings.povButton.SetActive(true);
+        ReplaySettings.hideLocalPlayerToggle.SetActive(true);
         
         ReplayPlaybackControls.timeline.transform.GetChild(0).GetComponent<TimelineScrubber>().header = currentReplay.Header;
 
@@ -2083,6 +2098,9 @@ public class Main : MelonMod
 
         if (ReplayRoot != null)
             GameObject.Destroy(ReplayRoot);
+        
+        ReplaySettings.povButton.SetActive(false);
+        ReplaySettings.hideLocalPlayerToggle.SetActive(false);
 
         replayStructures = null;
         replayPlayers = null;
@@ -2410,28 +2428,29 @@ public class Main : MelonMod
             Transform RHand = VRRig.GetChild(2);
             Transform Head = VRRig.GetChild(0).GetChild(0);
 
-            PlayerShiftstoneVFX active = PlayerShiftstoneVFX.None;
-            Transform chest = p.Controller.GetSubsystem<PlayerIK>().VrIK.references.chest;
-
-            var charge = chest.Find("Chargestone VFX")?.GetComponent<VisualEffect>();
-            if (charge != null && charge.aliveParticleCount > 0)
-                active |= PlayerShiftstoneVFX.Charge;
-
-            var adamant = chest.Find("Adamantstone_VFX")?.GetComponent<VisualEffect>();
-            if (adamant != null && adamant.aliveParticleCount > 0)
-                active |= PlayerShiftstoneVFX.Adamant;
-
-            var surge = chest.Find("Surgestone_VFX")?.GetComponent<VisualEffect>();
-            if (surge != null && surge.aliveParticleCount > 0)
-                active |= PlayerShiftstoneVFX.Surge;
-
-            var vigor = chest.Find("Vigorstone_VFX")?.GetComponent<VisualEffect>();
-            if (vigor != null && vigor.aliveParticleCount > 0)
-                active |= PlayerShiftstoneVFX.Vigor;
-
-            var shiftstones = p.Controller.GetSubsystem<PlayerShiftstoneSystem>().GetCurrentShiftStoneConfiguration();
+            var shiftstoneSystem = p.Controller.GetSubsystem<PlayerShiftstoneSystem>();
+            var currentShiftstoneEffects = shiftstoneSystem.currentShiftstoneEffects.ToArray();
+            var shiftstones = shiftstoneSystem.GetCurrentShiftStoneConfiguration();
             int left = shiftstones is { Count: > 0 } ? shiftstones[0] : -1;
             int right = shiftstones is { Count: > 0 } ? shiftstones[1] : -1;
+            
+            PlayerShiftstoneVFX active = PlayerShiftstoneVFX.None;
+
+            var charge = currentShiftstoneEffects.FirstOrDefault(e => e.ResourceName == "ChargeStone_VFX");
+            if (charge != null && charge.isPlaying)
+                active |= PlayerShiftstoneVFX.Charge;
+
+            var adamant = currentShiftstoneEffects.FirstOrDefault(e => e.ResourceName == "AdamantStone_VFX");
+            if (adamant != null && adamant.isPlaying)
+                active |= PlayerShiftstoneVFX.Adamant;
+
+            var surge = currentShiftstoneEffects.FirstOrDefault(e => e.ResourceName == "SurgeStone_VFX");
+            if (surge != null && surge.isPlaying)
+                active |= PlayerShiftstoneVFX.Surge;
+
+            var vigor = currentShiftstoneEffects.FirstOrDefault(e => e.ResourceName == "Vigorstone_VFX");
+            if (vigor != null && vigor.isPlaying)
+                active |= PlayerShiftstoneVFX.Vigor;
 
             bool recordFingers = (bool)HandFingerRecording.SavedValue;
             var playerHandPresence = p.Controller.GetSubsystem<PlayerHandPresence>();
@@ -3578,28 +3597,11 @@ public class Main : MelonMod
                 povHead.transform.localScale = Vector3.one;
                 povPlayer.Controller.transform.GetChild(6).gameObject.SetActive(true);
             }
-            
-            if (player == LocalPlayer)
-            {
-                cam.localPlayerVR = Calls.Players.GetLocalPlayer().Controller.GetSubsystem<PlayerVR>();
-                povHead.transform.localScale = Vector3.one;
-                
-                foreach (var renderer in localController.GetChild(1).GetComponentsInChildren<Renderer>())
-                    renderer.gameObject.layer = LayerMask.NameToLayer("PlayerController");
-                
-                foreach (var renderer in ReplayPlaybackControls.playbackControls.GetComponentsInChildren<Renderer>(true))
-                {
-                    if (renderer.gameObject.layer != LayerMask.NameToLayer("InteractionBase"))
-                        renderer.gameObject.layer = LayerMask.NameToLayer("Default");
-                }
-                
-                return;
-            }
         }
 
+        povPlayer = player;
         if (player != LocalPlayer)
         {
-            povPlayer = player;
             povHead = povPlayer.Controller.GetSubsystem<PlayerIK>().VrIK.references.head;
             povHead.transform.localScale = Vector3.zero;
             povPlayer.Controller.transform.GetChild(6).gameObject.SetActive(false);
@@ -3612,6 +3614,20 @@ public class Main : MelonMod
             }
             
             cam.localPlayerVR = povPlayer.Controller.GetSubsystem<PlayerVR>();
+        }
+        else
+        {
+            cam.localPlayerVR = Calls.Players.GetLocalPlayer().Controller.GetSubsystem<PlayerVR>();
+            if (povHead != null) povHead.transform.localScale = Vector3.one;
+            
+            foreach (var renderer in localController.GetChild(1).GetComponentsInChildren<Renderer>())
+                renderer.gameObject.layer = LayerMask.NameToLayer("PlayerController");
+            
+            foreach (var renderer in ReplayPlaybackControls.playbackControls.GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer.gameObject.layer != LayerMask.NameToLayer("InteractionBase"))
+                    renderer.gameObject.layer = LayerMask.NameToLayer("Default");
+            }
         }
     }
 

@@ -1671,6 +1671,21 @@ public class Main : MelonMod
                 if ((bool)EnableHaptics.SavedValue)
                     LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.15f, 1f, 0.15f);
                 
+                if (recordingIcon != null)
+                {
+                    recordingIcon.color = Color.green;
+            
+                    MelonCoroutines.Start(Utilities.LerpValue(
+                        () => recordingIcon.color,
+                        c => recordingIcon.color = c,
+                        Color.Lerp,
+                        isBufferClip && isRecording ? Color.red : new Color (0, 1, 0, 0),
+                        0.7f,
+                        Utilities.EaseOut,
+                        delay: 0.1f
+                    ));
+                }
+                
                 onSave?.Invoke();
 
                 ReplayFiles.ReloadReplays();
@@ -1693,22 +1708,7 @@ public class Main : MelonMod
         foreach (var t in frames)
             t.Time -= offsetTime;
 
-        SaveReplay(frames, "Replay Buffer", true, () =>
-        {
-            if (recordingIcon != null)
-            {
-                recordingIcon.color = Color.green;
-            
-                MelonCoroutines.Start(Utilities.LerpValue(
-                    () => recordingIcon.color,
-                    c => recordingIcon.color = c,
-                    Color.Lerp,
-                    new Color (0, 1, 0, 0),
-                    0.7f,
-                    Utilities.EaseOut
-                ));
-            }
-        });
+        SaveReplay(frames, "Replay Buffer", true);
     }
     
     
@@ -2657,6 +2657,9 @@ public class Main : MelonMod
         Frames.Clear();
         Events.Clear();
         isRecording = true;
+
+        if (recordingIcon != null)
+            recordingIcon.color = Color.red;
         
         if ((bool)EnableHaptics.SavedValue)
             LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.15f, 1f, 0.15f);
@@ -2864,7 +2867,7 @@ public class Main : MelonMod
         }
     }
 
-    public void TogglePlayback(bool active)
+    public void TogglePlayback(bool active, bool setSpeed = true)
     {
         if (!isPlaying)
         {
@@ -2886,7 +2889,8 @@ public class Main : MelonMod
             if ((bool)EnableHaptics.SavedValue)
                 LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.05f, 1f, 0.05f);
 
-            SetPlaybackSpeed(previousPlaybackSpeed);
+            if (setSpeed)
+                SetPlaybackSpeed(previousPlaybackSpeed);
         }
         else
         {
@@ -2897,10 +2901,9 @@ public class Main : MelonMod
             if ((bool)EnableHaptics.SavedValue)
                 LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.05f, 1f, 0.05f);
 
-            SetPlaybackSpeed(0f);
+            if (setSpeed) 
+                SetPlaybackSpeed(0f);
         }
-
-        return;
     }
 
     public void TryHandleController(
@@ -3623,8 +3626,7 @@ public class Main : MelonMod
 
     public void AddPlaybackSpeed(float delta, float minSpeed = -8f, float maxSpeed = 8f)
     {
-        if (isPaused)
-            TogglePlayback(true);
+        TogglePlayback(isPaused && !Approximately(playbackSpeed + delta, 0), false);
         
         float speed = playbackSpeed + delta;
         speed = Round(speed * 10f) / 10f;

@@ -952,16 +952,28 @@ public class DestroyOnPunch : MonoBehaviour
 
     public void OnTriggerEnter(Collider other)
     {
-        
         Vector3 velocity = Vector3.zero;
 
+        bool isLeftHand = true;
         if (other.name.Contains("Bone_Pointer_C_L"))
+        {
             velocity = leftHand.SampleVelocity(1);
+        }
         else if (other.name.Contains("Bone_Pointer_C_R"))
+        {
             velocity = rightHand.SampleVelocity(1);
+            isLeftHand = false;
+        }
 
         if (velocity.magnitude > punchThreshold)
+        {
             onDestroy?.Invoke();
+            
+            if ((bool)Main.instance.EnableHaptics.SavedValue)
+                Main.LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(
+                    isLeftHand ? 1f : 0f, isLeftHand ? 0.2f : 0f, !isLeftHand ? 1f : 0f, !isLeftHand ? 0.2f : 0f
+                );
+        }
     }
 }
 

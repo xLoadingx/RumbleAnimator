@@ -46,6 +46,15 @@ public class Patches
         }
     }
 
+    [HarmonyPatch(typeof(Structure), nameof(Structure.Start))]
+    public class Patch_Structure_Start
+    {
+        static Exception Finalizer(Exception __exception)
+        {
+            return null;
+        }
+    }
+
     [HarmonyPatch(typeof(AudioManager), nameof(AudioManager.Play))]
     [HarmonyPatch(new[] { typeof(AudioCall), typeof(Vector3), typeof(bool) })]
     public class Patch_AudioManager_Play
@@ -147,7 +156,7 @@ public class Patches
         {
             if (!Main.isRecording && !Main.isBuffering)
                 return;
-
+            
             if (!(bool)Main.instance.EnableLargeDamageMarker.SavedValue)
                 return;
             

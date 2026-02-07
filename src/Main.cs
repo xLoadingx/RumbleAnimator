@@ -297,6 +297,8 @@ public class Main : MelonMod
         if (((currentScene is "Map0" or "Map1" && (bool)AutoRecordMatches.SavedValue && PlayerManager.instance.AllPlayers.Count > 1) || (currentScene == "Park" && (bool)AutoRecordParks.SavedValue)) && !isReplayScene)
             StartRecording();
 
+        
+
         if ((ReplayCache.SFX == null || ReplayCache.structurePools == null) && currentScene != "Loader")
             ReplayCache.BuildCacheTables();
 
@@ -390,6 +392,9 @@ public class Main : MelonMod
         
         if (currentScene != "Loader")
             StartBuffering();
+        
+        if (isRecording || isBuffering)
+            SetupRecordingData();
 
         var vr = LocalPlayer.Controller.transform.GetChild(2);
         replayTable.metadataText.GetComponent<LookAtPlayer>().lockX = true;
@@ -716,7 +721,7 @@ public class Main : MelonMod
 
         vfx.name = "Crystalize VFX";
         vfx.transform.localScale = Vector3.one * 0.2f;
-        vfx.transform.localPosition = new Vector3(0, 0, 0.3045f);
+        vfx.transform.localPosition = new Vector3(0, 0, 0.3903f);
         vfx.SetActive(true);
 
         VisualEffect vfxComp = vfx.GetComponent<VisualEffect>();
@@ -924,7 +929,7 @@ public class Main : MelonMod
         var compp5x = p5x.transform.GetChild(0).GetComponent<InteractionButton>();
         compp5x.enabled = true;
         compp5x.onPressed.RemoveAllListeners();
-        compp5x.onPressed.AddListener((UnityAction)(() => { if (!isPaused) AddPlaybackSpeed(0.1f); }));
+        compp5x.onPressed.AddListener((UnityAction)(() => { AddPlaybackSpeed(0.1f); }));
         compp5x.transform.GetChild(3).GetChild(0).GetComponent<Image>().sprite = speedUpSprite;
 
         p5x.name = "+0.1 Speed";
@@ -935,7 +940,7 @@ public class Main : MelonMod
         var compnp5x = np5x.transform.GetChild(0).GetComponent<InteractionButton>();
         compnp5x.enabled = true;
         compnp5x.onPressed.RemoveAllListeners();
-        compnp5x.onPressed.AddListener((UnityAction)(() => { if (!isPaused) AddPlaybackSpeed(-0.1f); }));
+        compnp5x.onPressed.AddListener((UnityAction)(() => { AddPlaybackSpeed(-0.1f); }));
         compnp5x.transform.GetChild(3).GetChild(0).GetComponent<Image>().sprite = speedUpSprite;
 
         np5x.name = "-0.1 Speed";
@@ -946,7 +951,7 @@ public class Main : MelonMod
         var compp1x = p1x.transform.GetChild(0).GetComponent<InteractionButton>();
         compp1x.enabled = true;
         compp1x.onPressed.RemoveAllListeners();
-        compp1x.onPressed.AddListener((UnityAction)(() => { if (!isPaused) AddPlaybackSpeed(1f); }));
+        compp1x.onPressed.AddListener((UnityAction)(() => { AddPlaybackSpeed(1f); }));
 
         p1x.name = "+1 Speed";
         p1x.transform.localScale = Vector3.one * 1.8f;
@@ -956,7 +961,7 @@ public class Main : MelonMod
         var compnp1x = np1x.transform.GetChild(0).GetComponent<InteractionButton>();
         compnp1x.enabled = true;
         compnp1x.onPressed.RemoveAllListeners();
-        compnp1x.onPressed.AddListener((UnityAction)(() => { if (!isPaused) AddPlaybackSpeed(-1f); }));
+        compnp1x.onPressed.AddListener((UnityAction)(() => { AddPlaybackSpeed(-1f); }));
 
         np1x.name = "-1 Speed";
         np1x.transform.localScale = Vector3.one * 1.8f;
@@ -1515,7 +1520,7 @@ public class Main : MelonMod
         };
 
         if (type == StructureType.Ball &&
-            structure.transform.childCount == 3 &&
+            structure.transform.childCount >= 3 &&
             structure.transform.GetChild(2).name == "Ballcage")
         {
             type = structure.GetComponent<Tetherball>() != null ? StructureType.TetheredCagedBall : StructureType.CagedBall;
@@ -1820,7 +1825,6 @@ public class Main : MelonMod
         currentReplay = ReplaySerializer.LoadReplay(path);
 
         SetPlaybackSpeed(1f);
-        TogglePlayback(true);
         
         ReplayRoot = new GameObject("Replay Root");
         pedestalsParent = new GameObject("Pedestals");
@@ -1958,6 +1962,7 @@ public class Main : MelonMod
             }
         
             isPlaying = true;
+            TogglePlayback(true);
         }));
 
         if (currentReplay.Header.Scene is "Map0" or "Map1")
@@ -2355,22 +2360,36 @@ public class Main : MelonMod
         {
             pingTimer = Time.time;
 
-            if (PhotonNetwork.LocalPlayer.CustomProperties.TryGetValue("ping", out var objPing) && PhotonNetwork.MasterClient?.CustomProperties?.TryGetValue("ping", out var objHostPing) == true)
+            bool updated = false;
+
+            if (PhotonNetwork.InRoom && PhotonNetwork.LocalPlayer?.CustomProperties?.TryGetValue("ping", out var objPing) == true)
             {
                 int ping = objPing.Unbox<int>();
-                int hostPing = objHostPing.Unbox<int>();
+
+                if (!PhotonNetwork.IsMasterClient && PhotonNetwork.MasterClient?.CustomProperties?.TryGetValue("ping", out var objHostPing) == true)
+                    ping += objHostPing.Unbox<int>();
+
                 if (ping >= 0)
                 {
-                    if (!PhotonNetwork.IsMasterClient)
-                        ping += hostPing;
-                    
                     pingSum += ping;
-                    
                     pingCount++;
 
                     if (ping < pingMin) pingMin = ping;
                     if (ping > pingMax) pingMax = ping;
+
+                    updated = true;
                 }
+            }
+
+            if (!updated && PhotonNetwork.IsConnected)
+            {
+                int fallbackPing = PhotonNetwork.GetPing();
+
+                pingSum += fallbackPing;
+                pingCount++;
+
+                if (fallbackPing < pingMin) pingMin = fallbackPing;
+                if (fallbackPing > pingMax) pingMax = fallbackPing;
             }
         }
     }
@@ -3532,7 +3551,7 @@ public class Main : MelonMod
             else if (playbackSpeed < 0f)
                 label = $"<< {Abs(playbackSpeed):0.0}x";
             else
-                label = $"{playbackSpeed:0.0}x";
+                label = $">> {playbackSpeed:0.0}x";
             
             ReplayPlaybackControls.playbackSpeedText.text = label;
             ReplayPlaybackControls.playbackSpeedText.ForceMeshUpdate();
@@ -3541,6 +3560,9 @@ public class Main : MelonMod
 
     public void AddPlaybackSpeed(float delta, float minSpeed = -8f, float maxSpeed = 8f)
     {
+        if (isPaused)
+            TogglePlayback(true);
+        
         float speed = playbackSpeed + delta;
         speed = Round(speed * 10f) / 10f;
         speed = Clamp(speed, minSpeed, maxSpeed);
@@ -3606,7 +3628,11 @@ public class Main : MelonMod
             povHead.transform.localScale = Vector3.zero;
             povPlayer.Controller.transform.GetChild(6).gameObject.SetActive(false);
             povPlayer.Controller.transform.GetChild(9).gameObject.SetActive(false);
-
+            
+            LocalPlayer.Controller.GetSubsystem<PlayerCamera>().GetComponent<AudioListener>().enabled = false;
+            povPlayer.Controller.GetSubsystem<PlayerCamera>().GetComponent<AudioListener>().enabled = true;
+            
+            
             foreach (var renderer in ReplayPlaybackControls.playbackControls.GetComponentsInChildren<Renderer>(true))
             {
                 if (renderer.gameObject.layer != LayerMask.NameToLayer("InteractionBase"))
@@ -3617,8 +3643,11 @@ public class Main : MelonMod
         }
         else
         {
-            cam.localPlayerVR = Calls.Players.GetLocalPlayer().Controller.GetSubsystem<PlayerVR>();
+            cam.localPlayerVR = LocalPlayer.Controller.GetSubsystem<PlayerVR>();
             if (povHead != null) povHead.transform.localScale = Vector3.one;
+            
+            povPlayer.Controller.GetSubsystem<PlayerCamera>().GetComponent<AudioListener>().enabled = false;
+            LocalPlayer.Controller.GetSubsystem<PlayerCamera>().GetComponent<AudioListener>().enabled = true;
             
             foreach (var renderer in localController.GetChild(1).GetComponentsInChildren<Renderer>())
                 renderer.gameObject.layer = LayerMask.NameToLayer("PlayerController");

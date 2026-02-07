@@ -1463,7 +1463,10 @@ public enum FXOneShotType : byte
     RockCamStick,
     
     Fistbump,
-    FistbumpGoin
+    FistbumpGoin,
+    
+    Jump,
+    Dash
 }
 
 // ------------------------

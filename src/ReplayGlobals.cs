@@ -96,7 +96,9 @@ public static class ReplayCache
         { FXOneShotType.RockCamSpawn, "RockCamSpawn_VFX" },
         { FXOneShotType.RockCamDespawn, "RockCamDespawn_VFX" },
         { FXOneShotType.Fistbump, "PlayerBoxInteractionVFX" },
-        { FXOneShotType.FistbumpGoin, "FistbumpCoin" }
+        { FXOneShotType.FistbumpGoin, "FistbumpCoin" },
+        { FXOneShotType.Jump, "Jump_VFX" },
+        { FXOneShotType.Dash, "Dash_VFX" }
     };
 
     public static readonly Dictionary<FXOneShotType, string> FXToSFXName = new()
@@ -333,6 +335,8 @@ public static class Utilities
     
     public static IEnumerator LoadMap(int index, float fadeDuration = 2f, Action onLoaded = null, float onLoadedDelay = 0.01f)
     {
+        CombatManager.instance.CleanStructureList();
+        
         foreach (var structure in CombatManager.instance.structures.ToArray())
             structure?.Kill(Vector3.zero, false, false);
         
@@ -1561,6 +1565,8 @@ public static class ReplayCrystals
     {
         AudioManager.instance.Play(ReplayCache.SFX["Call_GearMarket_ButtonUnpress"], Main.instance.replayTable.transform.position);
 
+        crystalizeVFX.transform.localPosition = new Vector3(0, 0, 0.3903f);
+        
         bool isNewCrystal = false;
         if (crystal == null)
         {
@@ -1693,6 +1699,8 @@ public static class ReplayCrystals
         
         crystal.transform.localScale = Vector3.zero;
         crystal.transform.position = Main.instance.replayTable.transform.position;
+
+        crystalizeVFX.transform.localPosition = new Vector3(0, 0, 0.3045f);
 
         crystal.BaseColor = new (50, 50, 50, 255);
         crystal.ApplyVisuals();

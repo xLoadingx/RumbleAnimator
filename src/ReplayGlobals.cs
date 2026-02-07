@@ -980,6 +980,10 @@ public class ReplaySettings : MonoBehaviour
     public static InteractionButton deleteButton;
     public static InteractionButton copyPathButton;
     
+    public static GameObject povButton;
+    public static GameObject hideLocalPlayerToggle;
+    public static GameObject openControlsButton;
+    
     public static bool hideLocalPlayer = true;
     public static TextMeshPro pageNumberText;
     
@@ -987,9 +991,6 @@ public class ReplaySettings : MonoBehaviour
     public static Player selectedPlayer;
     public static Dictionary<int, List<(UserData, Player)>> playerList = new();
     public static int currentPlayerPage = 0;
-
-    public static GameObject povButton;
-    public static GameObject hideLocalPlayerToggle;
 
     public static GameObject slideOutPanel;
 
@@ -1003,6 +1004,7 @@ public class ReplaySettings : MonoBehaviour
     {
         povButton.SetActive(Main.isPlaying);
         hideLocalPlayerToggle.SetActive(Main.isPlaying);
+        openControlsButton.SetActive(Main.isPlaying);
         
         currentPath = path;
         currentHeader = ReplaySerializer.GetManifest(path);

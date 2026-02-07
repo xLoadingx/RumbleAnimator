@@ -1,24 +1,59 @@
 #include "std/mem.pat"
 #pragma pattern_limit 9999999
 
-struct Vector3 { float x, y, z; } [[static]];
-struct Quaternion { float x, y, z, w; } [[static]];
-struct String { u32 length; char value[length]; } [[static]];
+// ---------- Common ----------
 
-// -------------------- Player --------------------
+struct Vector3 { float x, y, z; } [[static]];
+
+struct QuaternionST {
+    u16 a;
+    u16 b;
+    u16 c;
+    u8 dropped;
+} [[static]];
+
+struct String {
+    u32 length;
+    char value[length];
+} [[static]];
+
+// ---------- Player ----------
 
 enum PlayerField : u8 {
     VRRigPos,
     VRRigRot,
+
     LHandPos,
     LHandRot,
+
     RHandPos,
     RHandRot,
+
     HeadPos,
     HeadRot,
+
     currentStack,
     Health,
-    active
+    active,
+
+    activeShiftstoneVFX,
+    leftShiftstone,
+    rightShiftstone,
+
+    lgripInput,
+    lindexInput,
+    lthumbInput,
+
+    rgripInput,
+    rindexInput,
+    rthumbInput,
+
+    rockCamActive,
+    rockCamPos,
+    rockCamRot,
+
+    armSpan,
+    length
 };
 
 struct PlayerFieldEntry {
@@ -28,16 +63,39 @@ struct PlayerFieldEntry {
 
     match (id) {
         (PlayerField::VRRigPos): Vector3 VRRigPos;
-        (PlayerField::VRRigRot): Quaternion VRRigRot;
+        (PlayerField::VRRigRot): QuaternionST VRRigRot;
+
         (PlayerField::LHandPos): Vector3 LHandPos;
-        (PlayerField::LHandRot): Quaternion LHandRot;
+        (PlayerField::LHandRot): QuaternionST LHandRot;
+
         (PlayerField::RHandPos): Vector3 RHandPos;
-        (PlayerField::RHandRot): Quaternion RHandRot;
+        (PlayerField::RHandRot): QuaternionST RHandRot;
+
         (PlayerField::HeadPos): Vector3 HeadPos;
-        (PlayerField::HeadRot): Quaternion HeadRot;
-        (PlayerField::currentStack): s16 stack;
-        (PlayerField::Health): s16 health;
+        (PlayerField::HeadRot): QuaternionST HeadRot;
+
+        (PlayerField::currentStack): s16 currentStack;
+        (PlayerField::Health): s16 Health;
         (PlayerField::active): bool active;
+
+        (PlayerField::activeShiftstoneVFX): u8 activeShiftstoneVFX;
+        (PlayerField::leftShiftstone): u8 leftShiftstone;
+        (PlayerField::rightShiftstone): u8 rightShiftstone;
+
+        (PlayerField::lgripInput): float lgripInput;
+        (PlayerField::lindexInput): float lindexInput;
+        (PlayerField::lthumbInput): float lthumbInput;
+
+        (PlayerField::rgripInput): float rgripInput;
+        (PlayerField::rindexInput): float rindexInput;
+        (PlayerField::rthumbInput): float rthumbInput;
+
+        (PlayerField::rockCamActive): bool rockCamActive;
+        (PlayerField::rockCamPos): Vector3 rockCamPos;
+        (PlayerField::rockCamRot): QuaternionST rockCamRot;
+
+        (PlayerField::armSpan): float armSpan;
+        (PlayerField::length): float length;
     }
 
     u8 _extra[(valueStart + size) > $ ? (valueStart + size) - $ : 0] [[hidden]];
@@ -54,16 +112,18 @@ struct PlayerStateChunk {
     u8 _pad[(dataStart + length) > $ ? (dataStart + length) - $ : 0] [[hidden]];
 };
 
-// -------------------- Structure --------------------
+// ---------- Structure ----------
 
 enum StructureField : u8 {
-    Position,
-    Rotation,
-    Active,
-    Grounded,
-    IsHeld,
-    IsFlicked,
-    IsShaking
+    position,
+    rotation,
+    active,
+    grounded,
+    isLeftHeld,
+    isRightHeld,
+    isFlicked,
+    currentState,
+    isTargetDisk
 };
 
 struct StructureFieldEntry {
@@ -72,13 +132,15 @@ struct StructureFieldEntry {
     u64 valueStart = $;
 
     match (id) {
-        (StructureField::Position): Vector3 position;
-        (StructureField::Rotation): Quaternion rotation;
-        (StructureField::Active): bool active;
-        (StructureField::Grounded): bool grounded;
-        (StructureField::IsHeld): bool isHeld;
-        (StructureField::IsFlicked): bool isFlicked;
-        (StructureField::IsShaking): bool isShaking;
+        (StructureField::position): Vector3 position;
+        (StructureField::rotation): QuaternionST rotation;
+        (StructureField::active): bool active;
+        (StructureField::grounded): bool grounded;
+        (StructureField::isLeftHeld): bool isLeftHeld;
+        (StructureField::isRightHeld): bool isRightHeld;
+        (StructureField::isFlicked): bool isFlicked;
+        (StructureField::currentState): u8 currentState;
+        (StructureField::isTargetDisk): bool isTargetDisk;
     }
 
     u8 _extra[(valueStart + size) > $ ? (valueStart + size) - $ : 0] [[hidden]];
@@ -95,11 +157,11 @@ struct StructureStateChunk {
     u8 _pad[(dataStart + length) > $ ? (dataStart + length) - $ : 0] [[hidden]];
 };
 
-// -------------------- Pedestal --------------------
+// ---------- Pedestal ----------
 
 enum PedestalField : u8 {
-    Position,
-    Active
+    position,
+    active
 };
 
 struct PedestalFieldEntry {
@@ -108,8 +170,8 @@ struct PedestalFieldEntry {
     u64 valueStart = $;
 
     match (id) {
-        (PedestalField::Position): Vector3 position;
-        (PedestalField::Active): bool active;
+        (PedestalField::position): Vector3 position;
+        (PedestalField::active): bool active;
     }
 
     u8 _extra[(valueStart + size) > $ ? (valueStart + size) - $ : 0] [[hidden]];
@@ -126,13 +188,17 @@ struct PedestalStateChunk {
     u8 _pad[(dataStart + length) > $ ? (dataStart + length) - $ : 0] [[hidden]];
 };
 
+// ---------- Event ----------
+
 enum EventField : u8 {
-    Type,
-    Position,
-    Rotation,
-    PlayerId,
-    Length,
-    ArmSpan
+    type,
+    position,
+    rotation,
+    masterId,
+    markerType,
+    playerIndex,
+    damage,
+    fxType
 };
 
 struct EventFieldEntry {
@@ -141,12 +207,14 @@ struct EventFieldEntry {
     u64 valueStart = $;
 
     match (id) {
-        (EventField::Type): u8 type;
-        (EventField::Position): Vector3 position;
-        (EventField::Rotation): Quaternion rotation;
-        (EventField::PlayerId): String playerId;
-        (EventField::Length): float length;
-        (EventField::ArmSpan): float armSpan;
+        (EventField::type): u8 type;
+        (EventField::position): Vector3 position;
+        (EventField::rotation): QuaternionST rotation;
+        (EventField::masterId): String masterId;
+        (EventField::markerType): u8 markerType;
+        (EventField::playerIndex): s32 playerIndex;
+        (EventField::damage): s32 damage;
+        (EventField::fxType): u8 fxType;
     }
 
     u8 _extra[(valueStart + size) > $ ? (valueStart + size) - $ : 0] [[hidden]];
@@ -163,7 +231,7 @@ struct EventChunk {
     u8 _pad[(dataStart + length) > $ ? (dataStart + length) - $ : 0] [[hidden]];
 };
 
-// -------------------- Frame entries + frames --------------------
+// ---------- Frames ----------
 
 enum ChunkType : u8 {
     PlayerState,
@@ -195,6 +263,8 @@ struct Frame {
 
     u8 _pad[(dataStart + frameSize) > $ ? (dataStart + frameSize) - $ : 0] [[hidden]];
 } [[fixed_size(sizeof(s32) + frameSize)]];
+
+// ---------- File ----------
 
 char magic[4] @ 0x0;
 Frame Replay[while(!std::mem::eof())] @ sizeof(magic);

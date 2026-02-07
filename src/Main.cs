@@ -78,6 +78,8 @@ public class Main : MelonMod
     public int pingMin = int.MaxValue;
     public int pingMax = 0;
     public static float pingTimer = 0f;
+
+    public TextMeshPro recordingIcon;
     
     public List<Frame> Frames = new();
     public List<EventChunk> Events = new();
@@ -297,8 +299,6 @@ public class Main : MelonMod
         if (((currentScene is "Map0" or "Map1" && (bool)AutoRecordMatches.SavedValue && PlayerManager.instance.AllPlayers.Count > 1) || (currentScene == "Park" && (bool)AutoRecordParks.SavedValue)) && !isReplayScene)
             StartRecording();
 
-        
-
         if ((ReplayCache.SFX == null || ReplayCache.structurePools == null) && currentScene != "Loader")
             ReplayCache.BuildCacheTables();
 
@@ -362,6 +362,16 @@ public class Main : MelonMod
             replayTable.metadataText.gameObject.SetActive(false);
         }
 
+        recordingIcon = Calls.Create.NewText().GetComponent<TextMeshPro>();
+        recordingIcon.transform.SetParent(LocalPlayer.Controller.GetSubsystem<PlayerUI>().transform.GetChild(0));
+        recordingIcon.name = "Replay Recording Icon";
+        recordingIcon.color = new Color(0, 1, 0, 0);
+        recordingIcon.text = "●";
+        recordingIcon.ForceMeshUpdate();
+        recordingIcon.transform.localPosition = new Vector3(0.2313f, 0.0233f, 0.9604f);
+        recordingIcon.transform.localRotation = Quaternion.Euler(20.2549f, 18.8002f, 0);
+        recordingIcon.transform.localScale = Vector3.one * 0.4f;
+        
         if (isReplayScene)
         {
             MatchHandler matchHandler = currentScene switch
@@ -1136,6 +1146,39 @@ public class Main : MelonMod
             new Vector3(0.5f, 0.5f),
             100f
         );
+        
+        var openControlsButton = GameObject.Instantiate(
+            Calls.GameObjects.Gym.LOGIC.DressingRoom.Controlpanel.Controls.Frameattachment.Viewoptions.ResetFighterButton.GetGameObject(),
+            replaySettingsPanel.transform.GetChild(1)
+        );
+
+        openControlsButton.name = "Open Controls Toggle";
+        openControlsButton.transform.localPosition = new Vector3(0.3658f, -0.1428f, -0.0138f);
+        openControlsButton.transform.localRotation = Quaternion.Euler(0, 0, 90);
+        openControlsButton.transform.localScale = Vector3.one * 1.5f;
+
+        var openControlsComp = openControlsButton.transform.GetChild(0).GetComponent<InteractionButton>();
+        openControlsComp.enabled = true;
+        openControlsComp.useLongPress = false;
+        openControlsComp.onPressed.RemoveAllListeners();
+        openControlsComp.onPressed.AddListener((UnityAction)(() =>
+        {
+            if (ReplayPlaybackControls.playbackControlsOpen) 
+                ReplayPlaybackControls.Close();
+            else 
+                ReplayPlaybackControls.Open();
+        }));
+
+        var openControlsText = Calls.Create.NewText().GetComponent<TextMeshPro>();
+        openControlsText.name = "Open Controls Text";
+        openControlsText.transform.SetParent(openControlsComp.transform);
+        openControlsText.transform.localPosition = new Vector3(0.0106f, 0.0117f, -0.1206f);
+        openControlsText.transform.localRotation = Quaternion.Euler(90, 90, 0);
+        openControlsText.transform.localScale = Vector3.one * 0.4f;
+
+        openControlsText.text = ". . .";
+        openControlsText.color = Color.white;
+        openControlsText.ForceMeshUpdate();
 
         var slideOutPanel = GameObject.Instantiate(bundle.LoadAsset<GameObject>("SlideOutPlayerSelector"), replaySettingsPanel.transform.GetChild(1));
 
@@ -1381,6 +1424,7 @@ public class Main : MelonMod
         ReplaySettings.pageNumberText = pageNumberTextComp;
         ReplaySettings.povButton = povCameraButton;
         ReplaySettings.hideLocalPlayerToggle = hideLocalPlayerButton;
+        ReplaySettings.openControlsButton = openControlsButton;
         
         GameObject.DontDestroyOnLoad(ReplayTable);
         GameObject.DontDestroyOnLoad(crystalPrefab);
@@ -1537,7 +1581,7 @@ public class Main : MelonMod
     
     // ----- Save Recordings ------
     
-    public void SaveReplay(Frame[] frames, string logPrefix, bool isBufferClip = false)
+    public void SaveReplay(Frame[] frames, string logPrefix, bool isBufferClip = false, Action onSave = null)
     {
         if (frames.Length == 0)
         {
@@ -1626,6 +1670,8 @@ public class Main : MelonMod
                 
                 if ((bool)EnableHaptics.SavedValue)
                     LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.15f, 1f, 0.15f);
+                
+                onSave?.Invoke();
 
                 ReplayFiles.ReloadReplays();
             }
@@ -1647,7 +1693,22 @@ public class Main : MelonMod
         foreach (var t in frames)
             t.Time -= offsetTime;
 
-        SaveReplay(frames, "Replay Buffer", true);
+        SaveReplay(frames, "Replay Buffer", true, () =>
+        {
+            if (recordingIcon != null)
+            {
+                recordingIcon.color = Color.green;
+            
+                MelonCoroutines.Start(Utilities.LerpValue(
+                    () => recordingIcon.color,
+                    c => recordingIcon.color = c,
+                    Color.Lerp,
+                    new Color (0, 1, 0, 0),
+                    0.7f,
+                    Utilities.EaseOut
+                ));
+            }
+        });
     }
     
     
@@ -2009,6 +2070,7 @@ public class Main : MelonMod
         ReplaySettings.SelectPlayerPage(0);
         ReplaySettings.povButton.SetActive(true);
         ReplaySettings.hideLocalPlayerToggle.SetActive(true);
+        ReplaySettings.openControlsButton.SetActive(true);
         
         ReplayPlaybackControls.timeline.transform.GetChild(0).GetComponent<TimelineScrubber>().header = currentReplay.Header;
 
@@ -2106,6 +2168,7 @@ public class Main : MelonMod
         
         ReplaySettings.povButton.SetActive(false);
         ReplaySettings.hideLocalPlayerToggle.SetActive(false);
+        ReplaySettings.openControlsButton.SetActive(false); 
 
         replayStructures = null;
         replayPlayers = null;

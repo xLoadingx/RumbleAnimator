@@ -2120,6 +2120,8 @@ public class Main : MelonMod
         if (!isPlaying) return;
         isPlaying = false;
         ReplayPlaybackControls.Close();
+        
+        UpdateReplayCameraPOV(LocalPlayer);
 
         foreach (var structure in PlaybackStructures)
         {
@@ -3433,6 +3435,8 @@ public class Main : MelonMod
 
                 playbackPlayer.Controller.GetSubsystem<PlayerScaling>().ScaleController(measurement);
 
+                UpdateReplayCameraPOV(povPlayer, ReplaySettings.hideLocalPlayer);
+
                 AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Succes"], 
                     playbackPlayer.Controller.GetSubsystem<PlayerIK>().VrIK.references.head.position
                 );
@@ -3629,6 +3633,12 @@ public class Main : MelonMod
         TogglePlayback(isPaused && !Approximately(playbackSpeed + delta, 0), false);
         
         float speed = playbackSpeed + delta;
+
+        if (Approximately(speed, 0))
+            TogglePlayback(false);
+        else
+            TogglePlayback(true, false);
+        
         speed = Round(speed * 10f) / 10f;
         speed = Clamp(speed, minSpeed, maxSpeed);
         SetPlaybackSpeed(speed);

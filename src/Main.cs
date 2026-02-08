@@ -2025,32 +2025,6 @@ public class Main : MelonMod
             isPlaying = true;
             TogglePlayback(true);
         }));
-
-        if (currentReplay.Header.Scene is "Map0" or "Map1")
-        {
-            MelonCoroutines.Start(DoMatchStart());
-
-            IEnumerator DoMatchStart()
-            {
-                MatchHandler.instance.DoStartCountdown();
-
-                float elapsed = 0f;
-                const float duration = 10f;
-
-                while (elapsed < duration)
-                {
-                    elapsed += Time.deltaTime * playbackSpeed;
-                    yield return null;
-                }
-
-                foreach (var player in PlaybackPlayers)
-                {
-                    player.Controller.gameObject.SetActive(false);
-                    player.Controller.GetSubsystem<PlayerNameTag>().FadePlayerNameTag(false);
-                }
-                
-            }
-        }
         
         // Playback Controls
         var timelineRenderer = ReplayPlaybackControls.timeline.GetComponent<MeshRenderer>();
@@ -2122,6 +2096,8 @@ public class Main : MelonMod
         ReplayPlaybackControls.Close();
         
         UpdateReplayCameraPOV(LocalPlayer);
+        TogglePlayback(true, ignoreIsPlaying: true);
+        SetPlaybackSpeed(1f);
 
         foreach (var structure in PlaybackStructures)
         {
@@ -2869,9 +2845,9 @@ public class Main : MelonMod
         }
     }
 
-    public void TogglePlayback(bool active, bool setSpeed = true)
+    public void TogglePlayback(bool active, bool setSpeed = true, bool ignoreIsPlaying = true)
     {
-        if (!isPlaying)
+        if (!isPlaying && !ignoreIsPlaying)
         {
             ReplayError();
             return;
@@ -3435,7 +3411,7 @@ public class Main : MelonMod
 
                 playbackPlayer.Controller.GetSubsystem<PlayerScaling>().ScaleController(measurement);
 
-                UpdateReplayCameraPOV(povPlayer, ReplaySettings.hideLocalPlayer);
+                UpdateReplayCameraPOV(povPlayer ?? LocalPlayer, ReplaySettings.hideLocalPlayer);
 
                 AudioManager.instance.Play(ReplayCache.SFX["Call_Measurement_Succes"], 
                     playbackPlayer.Controller.GetSubsystem<PlayerIK>().VrIK.references.head.position

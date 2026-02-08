@@ -420,10 +420,16 @@ public class Main : MelonMod
 
     IEnumerator DelayedParkLoad()
     {
+        if ((bool)EnableHaptics.SavedValue)
+            LocalPlayer.Controller.GetSubsystem<PlayerHaptics>().PlayControllerHaptics(1f, 0.1f, 1f, 0.1f);
+        
         yield return new WaitForSeconds(2f);
 
         if (currentScene == "Park")
         {
+            if (PhotonNetwork.CurrentRoom != null)
+                PhotonNetwork.CurrentRoom.isVisible = false;
+            
             Calls.GameObjects.Park.LOGIC.ParkInstance.GetGameObject().SetActive(false);
             PhotonNetwork.LeaveRoom();
             
@@ -1721,10 +1727,10 @@ public class Main : MelonMod
             ReplayError("Could not find file.");
             return;
         }
-
-        if (currentScene == "Park" && (PhotonNetwork.CurrentRoom?.PlayerCount > 1 || (PhotonNetwork.CurrentRoom?.IsVisible ?? false)))
+        
+        if (currentScene == "Park" && (PhotonNetwork.CurrentRoom?.PlayerCount ?? 0) > 1)
         {
-            ReplayError("Cannot load replay in non-private parks or parks with more than 1 player.");
+            ReplayError("Cannot start replay in room with more than 1 player.");
             return;
         }
         
@@ -1869,16 +1875,10 @@ public class Main : MelonMod
         }
         else
         {
-            if ((PhotonNetwork.CurrentRoom?.PlayerCount ?? 0) > 1)
-            {
-                ReplayError("Cannot start replay in room with more than 1 player.");
-                return;
-            }
-
-            if (currentScene == "Park" && (!PhotonNetwork.CurrentRoom?.IsVisible ?? false))
+            if (currentScene == "Park")
                 MelonCoroutines.Start(DelayedParkLoad());
-            
-            LoadReplay(ReplayFiles.currentReplayPath);
+            else
+                LoadReplay(ReplayFiles.currentReplayPath);
             
             SimpleScreenFadeInstance.Progress = 0f;
         }

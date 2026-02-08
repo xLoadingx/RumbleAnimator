@@ -1799,6 +1799,10 @@ public static class ReplayCrystals
         private Vector3 basePosition;
         private Vector3 velocity;
         private Vector3 lastPosition;
+
+        private Vector3 angularVelocity;
+        private Quaternion lastRotation;
+        
         private bool hasSavedAfterRelease;
 
         private object scaleRoutine;
@@ -1810,7 +1814,6 @@ public static class ReplayCrystals
             basePosition = transform.position;
             lastPosition = transform.position;
         }
-        
         
         public CrystalState CaptureState()
         {
@@ -1914,7 +1917,6 @@ public static class ReplayCrystals
                 )
             );
         }
-        
 
         public void Grab()
         {
@@ -1937,7 +1939,6 @@ public static class ReplayCrystals
             isGrabbed = false;
         }
         
-
         void Update()
         {
             if (!isAnimation)
@@ -1945,13 +1946,23 @@ public static class ReplayCrystals
                 if (!isGrabbed)
                 {
                     ApplyThrowVelocity();
-                    LerpUpright();
                     HandleProximity();
                 }
                 else
                 {
                     basePosition = transform.position;
                     velocity = (transform.position - lastPosition) / Time.deltaTime;
+                    
+                    Quaternion current = transform.rotation;
+                    Quaternion delta = current * Quaternion.Inverse(lastRotation);
+
+                    delta.ToAngleAxis(out float angleDeg, out Vector3 axis);
+                    if (angleDeg > 180f)
+                        angleDeg -= 360f;
+
+                    angularVelocity = axis * (angleDeg * Mathf.Deg2Rad) / Time.deltaTime;
+
+                    lastRotation = current;
                 }
 
                 lastPosition = transform.position;
@@ -1987,7 +1998,7 @@ public static class ReplayCrystals
 
         void ApplyThrowVelocity()
         {
-            if (velocity.sqrMagnitude < 0.001f)
+            if (velocity.sqrMagnitude < 0.001f && angularVelocity.sqrMagnitude < 0.001f)
             {
                 if (!hasSavedAfterRelease)
                 {
@@ -2001,22 +2012,27 @@ public static class ReplayCrystals
 
             basePosition += velocity * Time.deltaTime;
             velocity = Vector3.Lerp(velocity, Vector3.zero, 8f * Time.deltaTime);
-            
             transform.position = basePosition;
-        }
 
-        void LerpUpright()
-        {
-            Quaternion target = Quaternion.Euler(-90f, 0f, 0f);
+            float angle = angularVelocity.magnitude * Time.deltaTime;
+            if (angle > 0f)
+                transform.rotation = Quaternion.AngleAxis(angle * Rad2Deg, angularVelocity.normalized) * transform.rotation;
+            
+            angularVelocity = Vector3.Lerp(angularVelocity, Vector3.zero, 8f * Time.deltaTime);
 
-            float smooth = 1f - Exp(-6f * Time.deltaTime);
-            transform.rotation = Quaternion.Slerp(
-                transform.rotation,
-                target,
-                smooth
-            );
+            if (angularVelocity.sqrMagnitude < 0.0005f)
+            {
+                float a = Quaternion.Angle(transform.rotation, Quaternion.Euler(-90f, 0, 0));
+                float b = Quaternion.Angle(transform.rotation, Quaternion.Euler(90f, 0, 0));
+
+                if (a < 5f || b < 5f)
+                {
+                    Quaternion target = a < b ? Quaternion.Euler(-90f, 0, 0) : Quaternion.Euler(90f, 0, 0);
+
+                    transform.rotation = Quaternion.Slerp(transform.rotation, target, 8f * Time.deltaTime);
+                }
+            }
         }
-        
 
         static Color DeriveEdge(Color baseColor)
         {

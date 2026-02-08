@@ -1441,7 +1441,7 @@ public static class ReplayCrystals
         crystal.transform.position = position;
         crystal.Title = name;
 
-        GameObject text = Calls.Create.NewText(header.Title, 1f, Color.white, Vector3.zero, Quaternion.identity);
+        GameObject text = Calls.Create.NewText(name, 1f, Color.white, Vector3.zero, Quaternion.identity);
 
         text.name = "Replay Title";
         text.transform.SetParent(crystal.transform, false);

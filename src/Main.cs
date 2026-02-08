@@ -1721,6 +1721,12 @@ public class Main : MelonMod
             ReplayError("Could not find file.");
             return;
         }
+
+        if (currentScene == "Park" && (PhotonNetwork.CurrentRoom?.PlayerCount > 1 || (PhotonNetwork.CurrentRoom?.IsVisible ?? false)))
+        {
+            ReplayError("Cannot load replay in non-private parks or parks with more than 1 player.");
+            return;
+        }
         
         if (isPlaying)
             StopReplay();
@@ -1880,9 +1886,6 @@ public class Main : MelonMod
     
     public void LoadReplay(string path)
     {
-        if (currentScene == "Park" && (PhotonNetwork.CurrentRoom?.PlayerCount > 1 || (PhotonNetwork.CurrentRoom?.IsVisible ?? false)))
-            return;
-        
         currentReplay = ReplaySerializer.LoadReplay(path);
 
         SetPlaybackSpeed(1f);

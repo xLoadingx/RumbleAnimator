@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
@@ -20,6 +21,7 @@ using UnityEngine.VFX;
 using static UnityEngine.Mathf;
 using MethodBase = System.Reflection.MethodBase;
 using SceneManager = Il2CppRUMBLE.Managers.SceneManager;
+using Stack = Il2CppRUMBLE.MoveSystem.Stack;
 
 namespace ReplayMod;
 
@@ -236,6 +238,16 @@ public class Patches
             Main.instance.MasterIdToIndex[id] = index;
             Main.instance.RecordedPlayers.Add(player);
 
+            MelonCoroutines.Start(VisualDataDelay(player));
+        }
+
+        public static IEnumerator VisualDataDelay(Player player)
+        {
+            yield return new WaitForSeconds(0.1f);
+
+            if (player == null)
+                yield break;
+            
             var info = new PlayerInfo(player);
 
             Main.instance.PlayerInfos.Add(info);
@@ -290,7 +302,7 @@ public class Patches
         static void Postfix(Collider other)
         {
             // In a replay park
-            if (PhotonNetwork.CurrentRoom == null)
+            if (PhotonNetwork.CurrentRoom == null && Main.instance.currentScene == "Park")
                 MelonCoroutines.Start(Utilities.LoadMap(1));
         }
     }

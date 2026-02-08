@@ -1,5 +1,5 @@
-# Rumble Animator
-Rumble Animator is a replay and animation system for RUMBLE VR. It records gameplay into a Brotli-compressed binary format and allows replays to be viewed in-game.
+# Replay Mod
+Replay Mod is a replay and animation system for RUMBLE VR. It records gameplay into a Brotli-compressed binary format and allows replays to be viewed in-game.
 
 It can be used for:
 - Match analysis

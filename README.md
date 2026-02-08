@@ -14,14 +14,14 @@ It can be used for:
 You can start recording in two ways:  
 - **Automatic**: Enable `Auto Record Matches` or `Auto Record Parks` in the mod settings.
 - **Manual**: Hold the custom hand gesture for 3 seconds. You'll hear a clicking sound along with a corresponding VFX when a recording starts.  
-![HandGesture](CustomGesture.png)
+![HandGesture](Images/CustomGesture.png)
 
 Doing the gesture again will stop and save the recording.
 
 ---
 
 ### Replay Buffer
-If enabled, the replay bufffer continuously records the last few seconds of gameplay.
+If enabled, the replay buffer continuously records the last few seconds of gameplay.
 - The duration of the buffer can be configured in the mod settings.
 - To save the current buffer, press both buttons on the controller side you've selected.
 - A pop sound and a haptic vibration (if enabled) will play when saved.
@@ -30,7 +30,7 @@ If enabled, the replay bufffer continuously records the last few seconds of game
 
 ### Replay Table
 The Replay Table appears near the region selector in Gym.
-- Use the left/right arrows to scrool through saved replays.
+- Use the left/right arrows to scroll through saved replays.
 - Hold the Load button under the replay name to load into it's map and view the replay.
 - Replay names and metadata display according to the formats defined in:
   - `UserData/ReplayMod/Settings/MetadataFormats`
@@ -39,7 +39,7 @@ The Replay Table appears near the region selector in Gym.
 These use tag-based templates. Tags are documented in the files themselves.
 
 ### Crystals
-Holding the Crystalize button on the side of the Replay Table will turn the currently selected replay into a physical crystal
+Holding the Crystallize button on the side of the Replay Table will turn the currently selected replay into a physical crystal
 - Crystals can be held and placed anywhere in the Gym.
 - Throwing a crystal back onto the table will select the replay it contains.
 
@@ -47,7 +47,7 @@ Holding the Crystalize button on the side of the Replay Table will turn the curr
 
 ### Playback Controls
 While a replay is playing, you can toggle the playback panel by doing the following gesture:  
-![Playback Controls Gesture](PlaybackControlsGesture.png)  
+![Playback Controls Gesture](Images/PlaybackControlsGesture.png)  
 This opens a control menu with:
 - A timeline that shows current time and total duration
 - You can scrub through the replay by dragging your finger along the timeline
@@ -60,7 +60,7 @@ This opens a control menu with:
 This panel can also be punched to toggle it off.
 
 Alternatively, you can also do this gesture to toggle pause:  
-![Pause Gesture](PauseGesture.png)
+![Pause Gesture](Images/PauseGesture.png)
 
 ---
 

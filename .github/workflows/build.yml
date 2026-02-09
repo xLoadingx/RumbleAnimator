@@ -1,4 +1,4 @@
-name: Build RumbleAnimator
+name: Build
 on:
   workflow_call:
     inputs:
@@ -25,14 +25,16 @@ jobs:
         with:
           dotnet-version: "6.0.x"
       - name: Setup References
-        run: dotnet restore & curl -o 'ref.tar.gz' ${{ secrets.REFERENCESDOWNLOADURL }}
-      - run: |
+        run: |
+          dotnet restore & curl -o 'ref.tar.gz' ${{ secrets.REFERENCESDOWNLOADURL }}
           tar -xzf ref.tar.gz
           mv ref .ref # the file server hosting the references wont include dotfiles 3:
+
       - name: remove that postbuild event 😭
         run: sed -i '/<Target Name="PostBuild" AfterTargets="PostBuildEvent">/,/<\/Target>/d' ReplayMod.csproj
+
       - name: Build ReplayMod
-        run: dotnet build --configuration ${{ inputs.configuration }} --output .build
+        run: dotnet build --configuration ${{ inputs.configuration }} --output .build --no-restore
       - uses: actions/upload-artifact@v4
         with:
           name: ReplayMod-${{ inputs.configuration }}

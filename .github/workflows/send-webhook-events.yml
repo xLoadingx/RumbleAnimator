@@ -1,0 +1,25 @@
+name: Notify Modding Discord
+run-name: Send alert to discord
+on:
+  push:
+  workflow_run:
+    workflows: [Build Push]
+    types: [completed]
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Send Embed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_CONTEXT: ${{ toJSON(github) }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: |
+          pip install requests 
+          python .github/workflows/buildEmbed.py

@@ -1,10 +1,10 @@
-name: Trigger Debug build for push
+name: Build Push
 on:
   push:
     paths:
       - "src/**"
       - ".github/workflows/*"
 jobs:
-  build:
+  push:
     uses: ./.github/workflows/build.yml
     secrets: inherit

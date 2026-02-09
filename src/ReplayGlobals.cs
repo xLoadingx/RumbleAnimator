@@ -1044,7 +1044,11 @@ public class ReplaySettings : MonoBehaviour
         isRenaming = false;
 
         TimeSpan t = TimeSpan.FromSeconds(currentHeader.Duration);
-        durationComp.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
+        
+        durationComp.text = t.TotalHours >= 1 ? 
+            $"{(int)t.TotalHours}:{t.Minutes:D2}:{t.Seconds:D2}" : 
+            $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
+        
         durationComp.ForceMeshUpdate();
         
         isRenaming = false;

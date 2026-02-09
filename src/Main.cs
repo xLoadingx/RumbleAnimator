@@ -524,6 +524,7 @@ public class Main : MelonMod
         LeftHandControls = replayMod.AddToList("Left Controller Binding", "None",
             "Selects the action performed when both buttons on the left controller are pressed at the same time.\n" +
             "Possible values:\n" +
+            "- Toggle Recording\n" +
             "- Save Replay Buffer\n" +
             "- Add Marker (adds an event marker at the current time in a recording)\n" +
             "- None\n" +
@@ -532,6 +533,7 @@ public class Main : MelonMod
         RightHandControls = replayMod.AddToList("Right Controller Binding", "None",
             "Selects the action performed when both buttons on the right controller are pressed at the same time.\n" +
             "Possible values:\n" +
+            "- Toggle Recording\n" +
             "- Save Replay Buffer\n" +
             "- Add Marker (adds an event marker at the current time in a recording)\n" +
             "- None\n" +
@@ -557,7 +559,7 @@ public class Main : MelonMod
             isBuffering = (bool)ReplayBufferEnabled.SavedValue;
         };
         
-        var allowedBindings = new[] { "Save Replay Buffer", "Add Marker", "None" };
+        var allowedBindings = new[] { "Toggle Recording", "Save Replay Buffer", "Add Marker", "None" };
 
         bool IsValidBindingList(string input)
         {
@@ -2036,7 +2038,11 @@ public class Main : MelonMod
         timelineRenderer.material.SetFloat("_BP_Current", 0f);
 
         TimeSpan t = TimeSpan.FromSeconds(currentReplay.Header.Duration);
-        ReplayPlaybackControls.totalDuration.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
+
+        ReplayPlaybackControls.totalDuration.text = t.TotalHours >= 1 ? 
+            $"{(int)t.TotalHours}:{t.Minutes:D2}:{t.Seconds:D2}" : 
+            $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
+        
         ReplayPlaybackControls.currentDuration.text = "0:00";
 
         ReplayPlaybackControls.playbackTitle.text = Path.GetFileNameWithoutExtension(path).StartsWith("Replay") 
@@ -2922,6 +2928,17 @@ public class Main : MelonMod
             
             switch (action)
             {
+                case "Toggle Recording":
+                {
+                    if (isRecording)
+                        StopRecording();
+                    else
+                        StartRecording();
+
+                    PlayHaptics();
+                    break;
+                }
+                
                 case "Save Replay Buffer":
                 {
                     SaveReplayBuffer();
@@ -2989,7 +3006,10 @@ public class Main : MelonMod
         if (ReplayPlaybackControls.currentDuration != null)
         {
             TimeSpan t = TimeSpan.FromSeconds(elapsedPlaybackTime);
-            ReplayPlaybackControls.currentDuration.text = $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
+            
+            ReplayPlaybackControls.totalDuration.text = t.TotalHours >= 1 ? 
+                $"{(int)t.TotalHours}:{t.Minutes:D2}:{t.Seconds:D2}" : 
+                $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
         }
     }
     

@@ -56,7 +56,7 @@ if EVENT_TYPE == "workflow_run":
             }
         )
         files = {
-            "file": ("ReplayMod-Debug.dll", open("ReplayMod.dll", "rb")),
+            "file": ("ReplayMod.dll", open("ReplayMod.dll", "rb")),
         }
         requests.post(
             WEBHOOK_URL, payload, headers={"Content-Type": "application/json"}

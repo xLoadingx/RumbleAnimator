@@ -23,7 +23,7 @@ if EVENT_TYPE == "workflow_run":
                 "tts": False,
                 "embeds": [
                     {
-                        "title": f'Build Failing for "{workflow_run["head_commit"]["message"]}"',
+                        "title": f'Build Failing for "{workflow_run["head_commit"]["message"].split("\n")[0]}"',
                         "url": workflow_run["html_url"],
                         "color": 16525609,
                     }
@@ -46,7 +46,7 @@ if EVENT_TYPE == "workflow_run":
                 "tts": False,
                 "embeds": [
                     {
-                        "title": f'Build Passing for "{workflow_run["head_commit"]["message"]}"',
+                        "title": f'Build Passing for "{workflow_run["head_commit"]["message"].split("\n")[0]}"',
                         "url": workflow_run["html_url"],
                         "color": 38912,
                     }
@@ -56,6 +56,14 @@ if EVENT_TYPE == "workflow_run":
             }
         )
         files = {
+            "payload_json": (
+                None,
+                {
+                    "content": "",
+                    "username": "Github Actions",
+                    "avatar_url": "https://cdn.discordapp.com/avatars/1462236419492810976/e57fd67dc7ca0cc840a0e87a82281bc5.webp",
+                },
+            ),
             "file": ("ReplayMod.dll", open("ReplayMod.dll", "rb")),
         }
         requests.post(
@@ -69,7 +77,7 @@ if EVENT_TYPE == "push":
 
     embed_description = ""
     for commit in GITHUB_CONTEXT["event"]["commits"]:
-        embed_description += f" [`{commit['id'][:7]}`]({commit['url']}) {commit['message']} - {commit['author']['username']}\n"
+        embed_description += f" [`{commit['id'][:7]}`]({commit['url']}) {commit['message'].split('\n')[0]} - {commit['author']['username']}\n"
 
     payload = dumps(
         {

@@ -83,6 +83,7 @@ public class Main : MelonMod
     
     public List<Frame> Frames = new();
     public List<EventChunk> Events = new();
+    public List<Marker> Markers = new();
     
     // World
     public List<Structure> Structures = new();
@@ -226,13 +227,13 @@ public class Main : MelonMod
             if (!(bool)EnableRoundEndMarker.SavedValue)
                 return;
             
-            EventChunk evt = new EventChunk
+            Marker marker = new Marker
             {
-                type = EventType.Marker,
-                markerType = MarkerType.RoundEnd
+                name = "core.roundEnded",
+                time = lastSampleTime
             };
 
-            Events.Add(evt);
+            Markers.Add(marker);
         };
 
         Calls.onMatchEnded += () =>
@@ -242,13 +243,13 @@ public class Main : MelonMod
             if (!(bool)EnableMatchEndMarker.SavedValue)
                 return;
             
-            EventChunk evt = new EventChunk
+            Marker marker = new Marker
             {
-                type = EventType.Marker,
-                markerType = MarkerType.MatchEnd
+                name = "core.matchEnded",
+                time = lastSampleTime
             };
 
-            Events.Add(evt);
+            Markers.Add(marker);
         };
         
         ReplayFiles.Init();
@@ -815,6 +816,9 @@ public class Main : MelonMod
         heisenhowuserText.transform.localRotation = Quaternion.Euler(51.2551f, 110.4334f, 107.2313f);
 
         replayTable.heisenhouserText = heisenhowuserText.GetComponent<TextMeshPro>();
+
+        replayTable.heisenhouserText.fontSizeMin = 1;
+        replayTable.heisenhouserText.enableAutoSizing = true;
 
         crystalizeButtonComp.onPressedAudioCall = loadReplayButtonComp.onPressedAudioCall;
 
@@ -1589,7 +1593,7 @@ public class Main : MelonMod
     
     // ----- Save Recordings ------
     
-    public void SaveReplay(Frame[] frames, string logPrefix, bool isBufferClip = false, Action onSave = null)
+    public void SaveReplay(Frame[] frames, string logPrefix, bool isBufferClip = false, Action<ReplayInfo, string> onSave = null)
     {
         if (frames.Length == 0)
         {
@@ -1639,14 +1643,8 @@ public class Main : MelonMod
             Frames = frames
         };
         
-        var markers = frames
-            .SelectMany(f => f.Events ?? Array.Empty<EventChunk>(), (f, e) => new { f.Time, Event = e})
-            .Where(x => x.Event.type == EventType.Marker)
-            .Select(x => new Marker{ type = x.Event.markerType, time = x.Time })
-            .ToArray();
-
-        replayInfo.Header.MarkerCount = markers.Length;
-        replayInfo.Header.Markers = markers;
+        replayInfo.Header.MarkerCount = Markers.Count;
+        replayInfo.Header.Markers = Markers.ToArray();
         
         string pattern = Utilities.GetFriendlySceneName(recordingSceneName) switch
         {
@@ -1693,8 +1691,8 @@ public class Main : MelonMod
                         delay: 0.1f
                     ));
                 }
-                
-                onSave?.Invoke();
+
+                onSave?.Invoke(replayInfo, path);
 
                 ReplayFiles.ReloadReplays();
             }
@@ -1716,7 +1714,7 @@ public class Main : MelonMod
         foreach (var t in frames)
             t.Time -= offsetTime;
 
-        SaveReplay(frames, "Replay Buffer", true);
+        SaveReplay(frames, "Replay Buffer", true, (info, path) => ReplayAPI.ReplaySavedInternal(info, true, path));
     }
     
     
@@ -2029,6 +2027,8 @@ public class Main : MelonMod
         
             isPlaying = true;
             TogglePlayback(true);
+            
+            ReplayAPI.ReplayStartedInternal(currentReplay);
         }));
         
         // Playback Controls
@@ -2081,12 +2081,12 @@ public class Main : MelonMod
             markerObj.transform.localScale = new Vector3(0.0062f, 1.0836f, 0.0128f);
             markerObj.transform.position = position;
 
-            Color color = marker.type switch
+            Color color = marker.name switch
             {
-                MarkerType.Manual => Color.white,
-                MarkerType.LargeDamage => new Color (0.7f, 0.1f, 0.1f),
-                MarkerType.RoundEnd => new Color(0.7f, 0.6f, 0.85f),
-                MarkerType.MatchEnd => Color.black,
+                "core.manual" => Color.white,
+                "core.largeDamage" => new Color (0.7f, 0.1f, 0.1f),
+                "core.roundEnded" => new Color(0.7f, 0.6f, 0.85f),
+                "core.matchEnded" => Color.black,
                 _ => Color.white
             };
 
@@ -2161,6 +2161,8 @@ public class Main : MelonMod
         replayPlayers = null;
         PlaybackStructures = null;
         PlaybackPlayers = null;
+
+        ReplayAPI.ReplayEndedInternal(currentReplay);
     }
 
     public void ReorderPlayers()
@@ -2391,11 +2393,17 @@ public class Main : MelonMod
             frame.Time = Time.time;
 
             if (isRecording)
-                Frames.Add(frame.Clone());
-
+            {
+                var cloned = frame.Clone();
+                ReplayAPI.OnRecordFrameInternal(cloned, false);
+                Frames.Add(cloned);
+            }
+            
             if (isBuffering)
             {
-                replayBuffer.Enqueue(frame.Clone());
+                var cloned = frame.Clone();
+                ReplayAPI.OnRecordFrameInternal(cloned, true);
+                replayBuffer.Enqueue(cloned);
 
                 float cutoffTime = frame.Time - (int)ReplayBufferDuration.SavedValue;
                 while (replayBuffer.Count > 0 && replayBuffer.Peek().Time < cutoffTime)
@@ -2443,7 +2451,6 @@ public class Main : MelonMod
             }
         }
     }
-    
     
     Frame CaptureFrame()
     {
@@ -2661,7 +2668,7 @@ public class Main : MelonMod
         }
         
         isRecording = false;
-        SaveReplay(Frames.ToArray(), "Recording");
+        SaveReplay(Frames.ToArray(), "Recording", onSave: (info, path) => ReplayAPI.ReplaySavedInternal(info, false, path));
 
         pingCount = 0;
         pingSum = 0;
@@ -2891,6 +2898,8 @@ public class Main : MelonMod
             if (setSpeed) 
                 SetPlaybackSpeed(0f);
         }
+
+        ReplayAPI.ReplayPauseChangedInternal(active);
     }
 
     public void TryHandleController(
@@ -2935,7 +2944,6 @@ public class Main : MelonMod
                     else
                         StartRecording();
 
-                    PlayHaptics();
                     break;
                 }
                 
@@ -2951,12 +2959,13 @@ public class Main : MelonMod
                     if (!isRecording && !isBuffering)
                         break;
                 
-                    EventChunk evt = new EventChunk
+                    Marker marker = new Marker
                     {
-                        type = EventType.Marker,
-                        markerType = MarkerType.Manual,
+                        name = "core.manual",
+                        time = lastSampleTime
                     };
-                    Events.Add(evt);
+
+                    Markers.Add(marker);
                 
                     PlayHaptics();
                 
@@ -3353,6 +3362,8 @@ public class Main : MelonMod
                     
                     if (flags.HasFlag(flag))
                     {
+                        vfx.transform.localScale = Vector3.one;
+                        
                         vfx.Play();
                         vfx.playRate = Abs(playbackSpeed);
                         AudioManager.instance.Play(ReplayCache.SFX["Call_Shiftstone_Use"], chest.transform.position);
@@ -3530,6 +3541,8 @@ public class Main : MelonMod
                     break;
             }
         }
+
+        ReplayAPI.OnPlaybackFrameInternal(a);
     }
 
     public GameObject SpawnFX(FXOneShotType fxType, Vector3 position, Quaternion rotation = default)
@@ -3594,6 +3607,9 @@ public class Main : MelonMod
             
                 foreach (var vfx in structure.GetComponentsInChildren<VisualEffect>())
                     vfx.playRate = Abs(newSpeed);
+
+                if (structure.GetComponent<Structure>().frictionVFX != null)
+                    structure.GetComponent<Structure>().frictionVFX.returnToPoolTimer = null;
             }
 
             for (int i = 0; i < VFXParent.transform.childCount; i++)
@@ -3672,6 +3688,8 @@ public class Main : MelonMod
             : 1f;
 
         ApplyInterpolatedFrame(currentPlaybackFrame, Clamp01(t));
+
+        ReplayAPI.ReplayTimeChangedInternal(time);
     }
     
     public void UpdateReplayCameraPOV(Player player, bool hideLocalPlayer = false)

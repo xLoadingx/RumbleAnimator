@@ -188,12 +188,12 @@ public class Patches
                 lastLargeDamageTime[playerId] = time;
                 queue.Clear();
                 
-                Main.instance.Events.Add(new EventChunk
+                Main.instance.Markers.Add(new Marker
                 {
-                    type = EventType.Marker,
-                    markerType = MarkerType.LargeDamage,
-                    position = Main.instance.head.position,
-                    playerIndex = GetPlayerIndex(__instance.ParentController.assignedPlayer)
+                    name = "core.largeDamage",
+                    time = time,
+                    PlayerIndex = GetPlayerIndex(__instance.ParentController.assignedPlayer),
+                    position = __instance.ParentController.GetSubsystem<PlayerVR>().transform.position
                 });
             }
         }

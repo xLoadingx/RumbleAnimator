@@ -88,6 +88,7 @@ Defined structure types:
 - CagedBall
 - LargeRock
 - SmallRock
+- TetheredCagedBall
 
 ---
 
@@ -149,8 +150,11 @@ Each state entry begins with:
     StructureState
     PedestalState
     Event
+    Extension
 
-`Index` refers to the index in the corresponding manifest array (`Players`, `Structures`, etc.)
+`Index` refers to the index in the corresponding manifest array (`Players`, `Structures`, etc.)  
+
+`Index` for extensions refers to the ModID defined by the mod using the FNV hash algorithm
 
 For `Event` entries, the index is unused and can be ignored on read.
 
@@ -245,29 +249,17 @@ Unlike `PlayerState` or `StructureState` chunks, which describe continuous chang
 | rotation    | Quaternion |
 | masterId    | string     | 
 | playerIndex | int        | 
-| markerType  | byte       | 
 | damage      | int        |
 | fxType      | byte       | 
 
 The event types, along with their corresponding fields, are as followed:
-- `Marker`
-  - `markerType`
 
 - `OneShotFX`
   - `position`
   - `rotation`
   - `fxType`
 
-Event types do not write to other fields.
-
-### Marker Type
-| Value        | Description                          |
-|--------------|--------------------------------------|
-| None         | No marker                            |
-| Manual       | Player-placed manual marker          |
-| RoundEnd     | Marker indicating the end of a round |
-| MatchEnd     | Marker indicating the end of a match |
-| LargeDamage  | Marker for a large damage event      |
+Event types do not write to other fields than the ones specified above.
 
 ### FX One Shot Type
 

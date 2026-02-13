@@ -440,11 +440,6 @@ public class ReplaySerializer
         );
 
         any |= WriteIf(
-            e.markerType != MarkerType.None,
-            () => w.Write(EventField.markerType, (byte)e.markerType)
-        );
-
-        any |= WriteIf(
             e.damage != 0,
             () => w.Write(EventField.damage, (byte)e.damage)
         );
@@ -615,6 +610,26 @@ public class ReplaySerializer
                 {
                     entriesBw.Write((byte)ChunkType.Event);
                     entriesBw.Write(i);
+                    entriesBw.Write((int)chunkMs.Length);
+                    entriesBw.Write(chunkMs.ToArray());
+                    entryCount++;
+                }
+            }
+
+            foreach (var ext in ReplayAPI.Extensions)
+            {
+                if (ext.OnWriteFrame == null)
+                    continue;
+
+                using var chunkMs = new MemoryStream();
+                using var w = new BinaryWriter(chunkMs);
+
+                ext.OnWriteFrame(w, f);
+
+                if (chunkMs.Length > 0)
+                {
+                    entriesBw.Write((byte)ChunkType.Extension);
+                    entriesBw.Write(ext.FrameExtensionId);
                     entriesBw.Write((int)chunkMs.Length);
                     entriesBw.Write(chunkMs.ToArray());
                     entryCount++;
@@ -914,6 +929,21 @@ public class ReplaySerializer
                         break;
                     }
 
+                    case ChunkType.Extension:
+                    {
+                        if (ReplayAPI.TryGetFrameReader(index, out var reader))
+                        {
+                            reader(br, frame);
+                        }
+                        else
+                        {
+                            int len = br.ReadInt32();
+                            br.BaseStream.Position += len;
+                        }
+
+                        break;
+                    }
+
                     default:
                     {
                         int len = br.ReadInt32();
@@ -936,7 +966,7 @@ public class ReplaySerializer
     
     // ----- Chunk Reading -----
     
-    static T ReadChunk<T, TField>(
+    public static T ReadChunk<T, TField>(
         BinaryReader br, 
         Func<T> ctor, 
         Action<T, TField, BinaryReader> readField
@@ -1063,7 +1093,6 @@ public class ReplaySerializer
                     case EventField.rotation: e.rotation = r.ReadQuaternion(); break;
                     case EventField.masterId: e.masterId = r.ReadString(); break;
                     case EventField.playerIndex: e.playerIndex = r.ReadInt32(); break;
-                    case EventField.markerType: e.markerType = (MarkerType)r.ReadByte(); break;
                     case EventField.damage: e.damage = r.ReadInt32(); break;
                     case EventField.fxType: e.fxType = (FXOneShotType)r.ReadByte(); break;
                 }
@@ -1392,9 +1421,6 @@ public class EventChunk
     public string masterId;
     public int playerIndex;
     
-    // Marker
-    public MarkerType markerType;
-    
     // Damage HitMarker
     public int damage;
     
@@ -1414,27 +1440,19 @@ public enum EventField : byte
     position = 1,
     rotation = 2,
     masterId = 3,
-    markerType = 6,
     playerIndex = 7,
     damage = 8,
     fxType = 9
 }
 
 [Serializable]
-public enum MarkerType : byte
-{
-    None,
-    Manual,
-    RoundEnd,
-    MatchEnd,
-    LargeDamage
-}
-
-[Serializable]
 public class Marker
 {
-    public MarkerType type;
-    public float time;
+    public string name { get; set; }
+    public float time { get; init; }
+
+    public Vector3? position { get; set; }
+    public int? PlayerIndex { get; set; }
 }
 
 [Serializable]
@@ -1473,8 +1491,9 @@ public enum FXOneShotType : byte
 
 public enum ChunkType : byte
 {
-    PlayerState,
-    StructureState,
-    PedestalState,
-    Event
+    PlayerState = 0,
+    StructureState = 1,
+    PedestalState = 2,
+    Event = 3,
+    Extension = 250
 }

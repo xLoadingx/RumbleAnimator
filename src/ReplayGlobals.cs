@@ -743,6 +743,8 @@ public static class ReplayFiles
                 currentHeader = header;
                 table.replayNameText.text = ReplaySerializer.GetReplayDisplayName(currentReplayPath, currentHeader);
                 Main.instance.replaySettings.Show(currentReplayPath);
+
+                ReplayAPI.ReplaySelectedInternal(header);
                 
                 var format = GetMetadataFormat(header.Scene);
                 table.metadataText.text = ReplaySerializer.FormatReplayString(format, header);
@@ -1148,6 +1150,8 @@ public class ReplaySettings : MonoBehaviour
         File.Move(currentPath, newPath);
         currentPath = newPath;
         Show(currentPath);
+
+        ReplayAPI.ReplayRenamedInternal(currentHeader, newPath);
 
         AudioManager.instance.Play(ReplayCache.SFX["Call_PoseGhost_MovePerformed"], transform.position);
     }
@@ -1691,6 +1695,7 @@ public static class ReplayCrystals
         SaveCrystals();
 
         File.Delete(replayPath);
+        ReplayAPI.ReplayDeletedInternal(replayPath);
 
         Main.instance.crystalBreakCoroutine = null;
     }

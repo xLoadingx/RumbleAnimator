@@ -144,6 +144,61 @@ public static class BinaryExtensions
         bw.Write((byte)bytes.Length);
         bw.Write(bytes);
     }
+    
+    public static void Write<TField>(this BinaryWriter bw, TField field, int v) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)4);
+        bw.Write(v);
+    }
+
+    public static void Write<TField>(this BinaryWriter bw, TField field, byte v) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)1);
+        bw.Write(v);
+    }
+
+    public static void Write<TField>(this BinaryWriter bw, TField field, long v) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)8);
+        bw.Write(v);
+    }
+
+    public static void Write<TField>(this BinaryWriter bw, TField field, double v) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)8);
+        bw.Write(v);
+    }
+    
+    public static void Write<TField>(this BinaryWriter bw, TField field, Vector2 v) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)8);
+        bw.Write(v.x);
+        bw.Write(v.y);
+    }
+    
+    public static void Write<TField>(this BinaryWriter bw, TField field, Color32 c) where TField : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)4);
+        bw.Write(c.r);
+        bw.Write(c.g);
+        bw.Write(c.b);
+        bw.Write(c.a);
+    }
+    
+    public static void Write<TField, TEnum>(this BinaryWriter bw, TField field, TEnum value) 
+        where TField : Enum 
+        where TEnum : Enum
+    {
+        bw.Write(Convert.ToByte(field));
+        bw.Write((byte)4);
+        bw.Write(Convert.ToInt32(value));
+    }
 }
 
 public class ReplaySerializer
@@ -970,6 +1025,31 @@ public class ReplaySerializer
     
     // ----- Chunk Reading -----
     
+    /// <summary>
+    /// Reads a tagged chunk from the stream and reconstructs a state object using the provided field handler.
+    /// </summary>
+    /// <param name="br">The <see cref="BinaryReader"/> positioned at the start of the chunk.  
+    /// The method will read the chunk length and process only that region.
+    /// </param>
+    /// <param name="ctor">
+    /// A function used to create the initial state object for this chunk.  
+    /// This allows callers to supply a fresh state or clone from a previous frame
+    /// to support delta-style updates
+    /// </param>
+    /// <param name="readField">
+    /// Callback invoked for each recognized field within the chunk.  
+    /// The callback receives the current state object, the field identifier, and
+    /// the <see cref="BinaryReader"/> positioned at the start of that field's data  
+    /// </param>
+    /// <typeparam name="T">
+    /// The type of the state object being constructed from that chunk.
+    /// </typeparam>
+    /// <typeparam name="TField">
+    /// The enum type representing valid field identifiers for this chunk.
+    /// </typeparam>
+    /// <returns>
+    /// The fully reconstructed state object after all fields in the chunk have been processed.
+    /// </returns>
     public static T ReadChunk<T, TField>(
         BinaryReader br, 
         Func<T> ctor, 

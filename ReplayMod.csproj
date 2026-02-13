@@ -27,6 +27,8 @@
       <None Remove="src\replayobjects3" />
       <None Remove="src\replayobjects4" />
       <None Remove="src\replayobjects5" />
+      <Compile Remove="docs\Extensions\ExampleMod.cs" />
+      <None Include="docs\Extensions\ExampleMod.cs" />
     </ItemGroup>
   
     <ItemGroup>

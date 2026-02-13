@@ -492,6 +492,8 @@ public class ReplaySerializer
             var replayEntry = zip.CreateEntry("replay", CompressionLevel.NoCompression);
             using (var stream = replayEntry.Open())
                 stream.Write(compressedReplay, 0, compressedReplay.Length);
+
+            ReplayAPI.InvokeArchiveBuild(zip);
         }
 
         done?.Invoke();
@@ -774,6 +776,8 @@ public class ReplaySerializer
         using var stream = manifestEntry.Open();
         using var reader = new StreamReader(stream);
 
+        ReplayAPI.InvokeArchiveRead(zip);
+        
         string json = reader.ReadToEnd();
         return JsonConvert.DeserializeObject<ReplayHeader>(json);
     }
@@ -1448,11 +1452,12 @@ public enum EventField : byte
 [Serializable]
 public class Marker
 {
-    public string name { get; set; }
+    public string name { get; init; }
     public float time { get; init; }
+    public Color color { get; init; }
 
-    public Vector3? position { get; set; }
-    public int? PlayerIndex { get; set; }
+    public Vector3? position { get; init; }
+    public int? PlayerIndex { get; init; }
 }
 
 [Serializable]

@@ -12,17 +12,57 @@ public static class ReplayAPI
 {
     private static readonly List<Extension> _extensions = new();
     
+    /// <summary>
+    /// Invoked when a replay is selected from the UI.
+    /// </summary>
     public static event Action<ReplaySerializer.ReplayHeader> ReplaySelected;
+    
+    /// <summary>
+    /// Invoked when playback begins for a replay.
+    /// Everything for the replay is loaded at this point.
+    /// </summary>
     public static event Action<ReplayInfo> ReplayStarted;
+    
+    /// <summary>
+    /// Invoked when playback is stopped and all replay objects are destroyed.
+    /// </summary>
     public static event Action<ReplayInfo> ReplayEnded;
+    
+    /// <summary>
+    /// Invoked when the playback time changes (seek or progression).
+    /// </summary>
     public static event Action<float> ReplayTimeChanged;
+    
+    /// <summary>
+    /// Invoked when playback is paused or resumed, along with the new toggle state.
+    /// </summary>
     public static event Action<bool> ReplayPauseChanged;
 
+    /// <summary>
+    /// Invoked for every frame during playback.
+    /// </summary>
     public static event Action<Frame> OnPlaybackFrame;
+    
+    /// <summary>
+    /// Invoked for every frame while recording or buffering.
+    /// The boolean indicates whether the frame belongs to the buffer.
+    /// </summary>
     public static event Action<Frame, bool> OnRecordFrame;
 
+    
+    /// <summary>
+    /// Invoked after a replay is saved to disk.
+    /// </summary>
     public static event Action<ReplayInfo, bool, string> ReplaySaved;
+    
+    /// <summary>
+    /// Invoked after a replay file is deleted, along with its path.
+    /// </summary>
     public static event Action<string> ReplayDeleted;
+    
+    /// <summary>
+    /// Invoked after a replay is renamed, along with its new path.
+    /// </summary>
     public static event Action<ReplaySerializer.ReplayHeader, string> ReplayRenamed;
 
     internal static void ReplaySelectedInternal(ReplaySerializer.ReplayHeader info) => ReplaySelected?.Invoke(info);
@@ -38,24 +78,93 @@ public static class ReplayAPI
     internal static void ReplayDeletedInternal(string path) => ReplayDeleted?.Invoke(path);
     internal static void ReplayRenamedInternal(ReplaySerializer.ReplayHeader header, string newPath) => ReplayRenamed?.Invoke(header, newPath);
 
+    /// <summary>
+    /// Gets whether a recording is currently active.
+    /// This is enabled when a user manually starts recording.
+    /// </summary>
     public static bool IsRecording => Main.isRecording;
+    
+    /// <summary>
+    /// Gets whether the buffer is currently recording frames.
+    /// Separate from manual recording.
+    /// </summary>
     public static bool IsBuffering => Main.isBuffering;
+    
+    /// <summary>
+    /// Gets whether playback is currently active.
+    /// </summary>
     public static bool IsPlaying => Main.isPlaying;
+    
+    /// <summary>
+    /// Gets whether playback is currently paused.
+    /// </summary>
     public static bool IsPaused => Main.isPaused;
+    
+    /// <summary>
+    /// The elapsed time (in seconds) of playback.
+    /// </summary>
     public static float CurrentTime => Main.elapsedPlaybackTime;
+    
+    /// <summary>
+    /// The total duration of playback.
+    /// </summary>
     public static float Duration => Main.currentReplay?.Header?.Duration ?? 0f;
 
+    /// <summary>
+    /// Returns the current format version that replays are written in.
+    /// </summary>
     public static Version FormatVersion => new (BuildInfo.FormatVersion);
 
+    /// <summary>
+    /// Gets the list of all player clones in the active playback.
+    /// </summary>
     public static IReadOnlyList<Clone> Players => Main.instance.PlaybackPlayers;
+    
+    /// <summary>
+    /// Gets the list of all playback structures in the active playback.
+    /// </summary>
     public static IReadOnlyList<GameObject> Structures => Main.instance.PlaybackStructures;
+    
+    /// <summary>
+    /// Gets the currently loaded replay, if any.
+    /// </summary>
     public static ReplayInfo CurrentReplay => Main.currentReplay;
 
+    
+    /// <summary>
+    /// Loads and begins playback of the replay at the specified file path.
+    /// This does not change scenes.
+    /// </summary>
+    /// <param name="path">The path to the replay</param>
     public static void Play(string path) => Main.instance.LoadReplay(path);
+    
+    /// <summary>
+    /// Stops and gets rid of the current replay and its objects.
+    /// </summary>
     public static void Stop() => Main.instance.StopReplay();
+    
+    /// <summary>
+    /// Pauses or resumes playback.
+    /// </summary>
+    /// <param name="playing">Whether the playback is playing or not</param>
     public static void TogglePlayback(bool playing) => Main.instance.TogglePlayback(playing);
+    
+    /// <summary>
+    /// Seeks playback to the specified time in seconds.
+    /// </summary>
+    /// <param name="time">Target time (in seconds)</param>
     public static void Seek(float time) => Main.instance.SetPlaybackTime(time);
+    
+    /// <summary>
+    /// Seeks playback to the specified frame index.
+    /// </summary>
+    /// <param name="frame">Target frame index</param>
     public static void Seek(int frame) => Main.instance.SetPlaybackFrame(frame);
+    
+    /// <summary>
+    /// Sets the playback speed multiplier.
+    /// </summary>
+    /// <param name="speed">Target speed</param>
     public static void SetSpeed(float speed) => Main.instance.SetPlaybackSpeed(speed);
 
     private static readonly Dictionary<int, Action<BinaryReader, Frame>> _frameReaders = new();
@@ -63,6 +172,10 @@ public static class ReplayAPI
     
     internal static IEnumerable<Extension> Extensions => _extensions;
 
+    /// <summary>
+    /// Computes a stable FNV-1a hash for a string.
+    /// Used to generate consistent frame extension identifiers for custom chunks.
+    /// </summary>
     private static int ComputeStableId(string input)
     {
         unchecked
@@ -80,6 +193,12 @@ public static class ReplayAPI
         }
     }
     
+    /// <summary>
+    /// Attempts to retrieve a registered frame reader for the specified extension id.
+    /// </summary>
+    /// <param name="id">The stable frame extension id.</param>
+    /// <param name="reader">The frame reader delegate if found</param>
+    /// <returns>True if a reader was found.</returns>
     internal static bool TryGetFrameReader(int id, out Action<BinaryReader, Frame> reader)
     {
         var ext = _extensions.FirstOrDefault(e => e.FrameExtensionId == id);
@@ -94,6 +213,17 @@ public static class ReplayAPI
         return false;
     }
     
+    /// <summary>
+    /// Registers a replay extension.
+    /// Allows injecting custom archive data and per-frame data.
+    /// The provided id must be unique.
+    /// </summary>
+    /// <param name="id">Unique identifier for the extension. This must be kept the same for the extension to be identified.</param>
+    /// <param name="onBuild">Called when building the replay archive.</param>
+    /// <param name="onRead">Called when reading the replay archive.</param>
+    /// <param name="onWriteFrame">Called when writing each frame</param>
+    /// <param name="onReadFrame">Called when reading each frame.</param>
+    /// <returns>The replay extension class.</returns>
     public static ReplayExtension RegisterExtension(
         string id, 
         Action<ArchiveBuilder> onBuild = null, 
@@ -121,6 +251,10 @@ public static class ReplayAPI
         return new ReplayExtension(id);
     }
 
+    /// <summary>
+    /// Invokes all registered archive build callbacks.
+    /// Called when constructing a replay archive.
+    /// </summary>
     internal static void InvokeArchiveBuild(ZipArchive zip)
     {
         foreach (var ext in Extensions)
@@ -130,6 +264,10 @@ public static class ReplayAPI
         }
     }
     
+    /// <summary>
+    /// Invokes all registered archive read callbacks.
+    /// Called when loading a replay archive.
+    /// </summary>
     internal static void InvokeArchiveRead(ZipArchive zip)
     {
         foreach (var ext in Extensions)
@@ -139,6 +277,10 @@ public static class ReplayAPI
         }
     }
 
+    /// <summary>
+    /// Represents a registered replay extension definition.
+    /// Stores callbacks and metadata used during replay serialization.
+    /// </summary>
     internal sealed class Extension
     {
         public string Id { get; }
@@ -168,6 +310,9 @@ public static class ReplayAPI
         }
     }
 
+    /// <summary>
+    /// Represents a registered replay extension.
+    /// </summary>
     public sealed class ReplayExtension
     {
         private readonly string _modId;
@@ -177,21 +322,21 @@ public static class ReplayAPI
             _modId = modId;
         }
 
-        public bool AddMarker(string name, float time)
-        {
-            if (!Main.isRecording || !Main.isBuffering)
-                return false;
-            
-            Main.instance.Markers.Add(new Marker
-            {
-                name = $"{_modId}.{name}",
-                time = time
-            });
-
-            return true;
-        }
+        /// <summary>
+        /// Adds a marker to the current recording.
+        /// Returns false if recording/buffering is not active.
+        /// </summary>
+        /// <param name="name">The name of the marker. Can be anything.</param>
+        /// <param name="time">The timestamp at which the marker is added. Use Time.time to add a marker at the current frame.</param>
+        /// <param name="color">The color in which the marker appears on the timeline.</param>
+        /// <returns>The added marker</returns>
+        public Marker AddMarker(string name, float time, Color color) =>
+            Main.instance.AddMarker($"{_modId}.{name}", color, time);
     }
     
+    /// <summary>
+    /// Provides utilities for writing extension-specific files into a replay archive during build.
+    /// </summary>
     public sealed class ArchiveBuilder
     {
         private readonly ZipArchive _zip;
@@ -203,6 +348,12 @@ public static class ReplayAPI
             _modId = modId;
         }
 
+        /// <summary>
+        /// Adds a file to the replay archive under the extension's namespace.
+        /// </summary>
+        /// <param name="path">Relative path within the extension folder.</param>
+        /// <param name="data">Raw file contents.</param>
+        /// <param name="level">Compression level to use</param>
         public void AddFile(string path, byte[] data, CompressionLevel level = CompressionLevel.Optimal)
         {
             var entry = _zip.CreateEntry($"extensions/{_modId}/{path}", level);
@@ -212,6 +363,9 @@ public static class ReplayAPI
         }
     }
     
+    /// <summary>
+    /// Provides utilities for reading extension-specific files from a replay archive.
+    /// </summary>
     public sealed class ArchiveReader
     {
         private readonly ZipArchive _zip;
@@ -225,6 +379,12 @@ public static class ReplayAPI
 
         private string GetFullPath(string relativePath) => $"extensions/{_modId}/{relativePath}";
 
+        /// <summary>
+        /// Attempts to read a file from the extension's acrhive namespace.
+        /// </summary>
+        /// <param name="relativePath">Relative path within the extension folder.</param>
+        /// <param name="data">The file data if found</param>
+        /// <returns>True if the file exists</returns>
         public bool TryGetFile(string relativePath, out byte[] data)
         {
             var entry = _zip.GetEntry(GetFullPath(relativePath));
@@ -242,6 +402,9 @@ public static class ReplayAPI
             return true;
         }
 
+        /// <summary>
+        /// Checks whether a file exists within the extension's archive namespace.
+        /// </summary>
         public bool FileExists(string relativePath) => _zip.GetEntry(GetFullPath(relativePath)) != null;
     }
 }

@@ -95,9 +95,9 @@ Once a replay is selected, a second panel appears with tools for managing the fi
 ---
 
 ## Replay Format
-The replay format is documented [here](ReplayFormat)
+The replay format is documented [here](docs/ReplayFormat)
 
-- [Binary format spec](ReplayFormat/README.md): `ReplayFormat/README.md`
-- [ImHex pattern](ReplayFormat/ReplayFile.hexpat): `ReplayFormat/ReplayFile.hexpat`
+- [Binary format spec](docs/ReplayFormat/README.md): `docs/ReplayFormat/README.md`
+- [ImHex pattern](docs/ReplayFormat/ReplayFile.hexpat): `docs/ReplayFormat/ReplayFile.hexpat`
 
 External tools can read replays using the documented format.

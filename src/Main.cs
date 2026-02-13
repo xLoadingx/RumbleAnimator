@@ -83,7 +83,9 @@ public class Main : MelonMod
     
     public List<Frame> Frames = new();
     public List<EventChunk> Events = new();
-    public List<Marker> Markers = new();
+    
+    public Queue<Marker> bufferMarkers = new();
+    public List<Marker> recordingMarkers = new();
     
     // World
     public List<Structure> Structures = new();
@@ -226,30 +228,16 @@ public class Main : MelonMod
         {
             if (!(bool)EnableRoundEndMarker.SavedValue)
                 return;
-            
-            Marker marker = new Marker
-            {
-                name = "core.roundEnded",
-                time = lastSampleTime
-            };
 
-            Markers.Add(marker);
+            AddMarker("core.roundEnded", new Color(0.7f, 0.6f, 0.85f));
         };
 
         Calls.onMatchEnded += () =>
         {
-            if (isRecording) StopRecording();
-
-            if (!(bool)EnableMatchEndMarker.SavedValue)
-                return;
+            if ((bool)EnableMatchEndMarker.SavedValue)
+                AddMarker("core.matchEnded", Color.black);
             
-            Marker marker = new Marker
-            {
-                name = "core.matchEnded",
-                time = lastSampleTime
-            };
-
-            Markers.Add(marker);
+            if (isRecording) StopRecording();
         };
         
         ReplayFiles.Init();
@@ -401,7 +389,7 @@ public class Main : MelonMod
         
         ReplayPlaybackControls.Close();
         
-        if (currentScene != "Loader")
+        if (currentScene != "Loader" && (bool)ReplayBufferEnabled.SavedValue)
             StartBuffering();
         
         if (isRecording || isBuffering)
@@ -1536,9 +1524,8 @@ public class Main : MelonMod
             if (player == null) continue;
 
             RecordedPlayers.Add(player);
-            var info = new PlayerInfo(player);
 
-            PlayerInfos.Add(info);
+            MelonCoroutines.Start(Patches.Patch_PlayerController_Initialize.VisualDataDelay(player));
         }
 
         Pedestals.AddRange(Utilities.EnumerateMatchPedestals());
@@ -1589,11 +1576,35 @@ public class Main : MelonMod
 
         return true;
     }
-    
+
+    public Marker AddMarker(string name, Color color)
+    {
+        return AddMarker(name, color, Time.time);
+    }
+
+    public Marker AddMarker(string name, Color color, float time)
+    {
+        if (!isRecording && !isBuffering)
+            return null;
+        
+        var marker = new Marker
+        {
+            name = name,
+            time = time
+        };
+
+        if (isRecording)
+            recordingMarkers.Add(marker);
+
+        if (isBuffering)
+            bufferMarkers.Enqueue(marker);
+
+        return marker;
+    }
     
     // ----- Save Recordings ------
     
-    public void SaveReplay(Frame[] frames, string logPrefix, bool isBufferClip = false, Action<ReplayInfo, string> onSave = null)
+    public void SaveReplay(Frame[] frames, List<Marker> markers, string logPrefix, bool isBufferClip = false, Action<ReplayInfo, string> onSave = null)
     {
         if (frames.Length == 0)
         {
@@ -1632,6 +1643,7 @@ public class Main : MelonMod
                 CustomMap = customMap,
                 FrameCount = frames.Length,
                 PedestalCount = Pedestals.Count,
+                MarkerCount = markers.Count,
                 AvgPing = pingCount > 0 ? pingSum / pingCount : -1,
                 MinPing = pingMin,
                 MaxPing = pingMax,
@@ -1643,8 +1655,8 @@ public class Main : MelonMod
             Frames = frames
         };
         
-        replayInfo.Header.MarkerCount = Markers.Count;
-        replayInfo.Header.Markers = Markers.ToArray();
+        replayInfo.Header.MarkerCount = markers.Count;
+        replayInfo.Header.Markers = markers.ToArray();
         
         string pattern = Utilities.GetFriendlySceneName(recordingSceneName) switch
         {
@@ -1709,12 +1721,7 @@ public class Main : MelonMod
     public void SaveReplayBuffer()
     {
         var frames = replayBuffer.ToArray();
-        float offsetTime = frames[0].Time;
-
-        foreach (var t in frames)
-            t.Time -= offsetTime;
-
-        SaveReplay(frames, "Replay Buffer", true, (info, path) => ReplayAPI.ReplaySavedInternal(info, true, path));
+        SaveReplay(frames, bufferMarkers.ToList(), "Replay Buffer", true, (info, path) => ReplayAPI.ReplaySavedInternal(info, true, path));
     }
     
     
@@ -2081,16 +2088,7 @@ public class Main : MelonMod
             markerObj.transform.localScale = new Vector3(0.0062f, 1.0836f, 0.0128f);
             markerObj.transform.position = position;
 
-            Color color = marker.name switch
-            {
-                "core.manual" => Color.white,
-                "core.largeDamage" => new Color (0.7f, 0.1f, 0.1f),
-                "core.roundEnded" => new Color(0.7f, 0.6f, 0.85f),
-                "core.matchEnded" => Color.black,
-                _ => Color.white
-            };
-
-            markerObj.GetComponent<MeshRenderer>().material.SetColor("_Overlay", color);
+            markerObj.GetComponent<MeshRenderer>().material.SetColor("_Overlay", marker.color);
             markerObj.AddComponent<ReplayTag>();
             markerObj.SetActive(true);
         }
@@ -2668,7 +2666,7 @@ public class Main : MelonMod
         }
         
         isRecording = false;
-        SaveReplay(Frames.ToArray(), "Recording", onSave: (info, path) => ReplayAPI.ReplaySavedInternal(info, false, path));
+        SaveReplay(Frames.ToArray(), recordingMarkers, "Recording", onSave: (info, path) => ReplayAPI.ReplaySavedInternal(info, false, path));
 
         pingCount = 0;
         pingSum = 0;
@@ -2958,15 +2956,8 @@ public class Main : MelonMod
                 {
                     if (!isRecording && !isBuffering)
                         break;
-                
-                    Marker marker = new Marker
-                    {
-                        name = "core.manual",
-                        time = lastSampleTime
-                    };
 
-                    Markers.Add(marker);
-                
+                    AddMarker("core.manual", Color.white);
                     PlayHaptics();
                 
                     AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_PartPanelTick_BackwardLocked"], head.position);

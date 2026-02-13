@@ -168,7 +168,7 @@ public static class ReplayAPI
     public static void SetSpeed(float speed) => Main.instance.SetPlaybackSpeed(speed);
 
     private static readonly Dictionary<int, Action<BinaryReader, Frame>> _frameReaders = new();
-    private static readonly Dictionary<int, Action<BinaryWriter, Frame>> _frameWriters = new();
+    private static readonly Dictionary<int, Action<FrameExtensionWriter, Frame>> _frameWriters = new();
     
     internal static IEnumerable<Extension> Extensions => _extensions;
 
@@ -199,7 +199,7 @@ public static class ReplayAPI
     /// <param name="id">The stable frame extension id.</param>
     /// <param name="reader">The frame reader delegate if found</param>
     /// <returns>True if a reader was found.</returns>
-    internal static bool TryGetFrameReader(int id, out Action<BinaryReader, Frame> reader)
+    internal static bool TryGetFrameReader(int id, out Action<BinaryReader, Frame, int> reader)
     {
         var ext = _extensions.FirstOrDefault(e => e.FrameExtensionId == id);
 
@@ -228,8 +228,8 @@ public static class ReplayAPI
         string id, 
         Action<ArchiveBuilder> onBuild = null, 
         Action<ArchiveReader> onRead = null,
-        Action<BinaryWriter, Frame> onWriteFrame = null,
-        Action<BinaryReader, Frame> onReadFrame = null)
+        Action<FrameExtensionWriter, Frame> onWriteFrame = null,
+        Action<BinaryReader, Frame, int> onReadFrame = null)
     {
         if (_extensions.Any(e => e.Id == id))
         {
@@ -290,16 +290,16 @@ public static class ReplayAPI
 
         public int FrameExtensionId { get; }
         
-        public Action<BinaryWriter, Frame> OnWriteFrame { get; }
-        public Action<BinaryReader, Frame> OnReadFrame { get; }
+        public Action<FrameExtensionWriter, Frame> OnWriteFrame { get; }
+        public Action<BinaryReader, Frame, int> OnReadFrame { get; }
 
         public Extension(
             string id, 
             Action<ArchiveBuilder> onBuild, 
             Action<ArchiveReader> onRead,
             int frameExtensionId,
-            Action<BinaryWriter, Frame> onWriteFrame,
-            Action<BinaryReader, Frame> onReadFrame)
+            Action<FrameExtensionWriter, Frame> onWriteFrame,
+            Action<BinaryReader, Frame, int> onReadFrame)
         {
             Id = id;
             OnBuild = onBuild;
@@ -332,6 +332,62 @@ public static class ReplayAPI
         /// <returns>The added marker</returns>
         public Marker AddMarker(string name, float time, Color color) =>
             Main.instance.AddMarker($"{_modId}.{name}", color, time);
+    }
+
+    /// <summary>
+    /// Provides structured writing access for replay frame extensions.
+    /// Allows an extension to emit one or more sub-chunks within a single frame.
+    /// </summary>
+    /// <remarks>
+    ///Each call to <see cref="WriteChunk"/> produces a distinct
+    /// <see cref="ChunkType.Extension"/> entry in the frame stream,
+    /// associated with the owning extension's identifier.
+    /// </remarks>
+    public sealed class FrameExtensionWriter
+    {
+        private readonly BinaryWriter _entriesWriter;
+        private readonly int _extensionId;
+        private readonly Action _incrementEntryCount;
+
+        internal FrameExtensionWriter(
+            BinaryWriter entriesWriter,
+            int extensionId,
+            Action incrementEntryCount
+        )
+        {
+            _entriesWriter = entriesWriter;
+            _extensionId = extensionId;
+            _incrementEntryCount = incrementEntryCount;
+        }
+
+        /// <summary>
+        /// Writes a single extension sub-chunk to the current frame.
+        /// </summary>
+        /// <param name="subIndex">
+        /// An extension-defined indentifier used to distinguish separate entities
+        /// (for example: player index, object index, or custon ID).
+        /// </param>
+        /// <param name="write">
+        /// Callback used to serialize the chunk payload using a temporary <see cref="BinaryWriter"/>
+        /// </param>
+        public void WriteChunk(int subIndex, Action<BinaryWriter> write)
+        {
+            using var chunkMs = new MemoryStream();
+            using var bw = new BinaryWriter(chunkMs);
+
+            write(bw);
+
+            if (chunkMs.Length == 0)
+                return;
+
+            _entriesWriter.Write((byte)ChunkType.Extension);
+            _entriesWriter.Write(_extensionId);
+            _entriesWriter.Write(subIndex);
+            _entriesWriter.Write((int)chunkMs.Length);
+            _entriesWriter.Write(chunkMs.ToArray());
+
+            _incrementEntryCount?.Invoke();
+        }
     }
     
     /// <summary>

@@ -678,19 +678,13 @@ public class ReplaySerializer
                 if (ext.OnWriteFrame == null)
                     continue;
 
-                using var chunkMs = new MemoryStream();
-                using var w = new BinaryWriter(chunkMs);
+                var writer = new ReplayAPI.FrameExtensionWriter(
+                    entriesBw,
+                    ext.FrameExtensionId,
+                    () => entryCount++
+                );
 
-                ext.OnWriteFrame(w, f);
-
-                if (chunkMs.Length > 0)
-                {
-                    entriesBw.Write((byte)ChunkType.Extension);
-                    entriesBw.Write(ext.FrameExtensionId);
-                    entriesBw.Write((int)chunkMs.Length);
-                    entriesBw.Write(chunkMs.ToArray());
-                    entryCount++;
-                }
+                ext.OnWriteFrame(writer, f);
             }
 
             frameBw.Write(entryCount);
@@ -990,16 +984,18 @@ public class ReplaySerializer
 
                     case ChunkType.Extension:
                     {
-                        if (ReplayAPI.TryGetFrameReader(index, out var reader))
+                        int extensionId = index;
+                        int subIndex = br.ReadInt32();
+                        int len = br.ReadInt32();
+
+                        long end = br.BaseStream.Position + len;
+
+                        if (ReplayAPI.TryGetFrameReader(extensionId, out var reader))
                         {
-                            reader(br, frame);
-                        }
-                        else
-                        {
-                            int len = br.ReadInt32();
-                            br.BaseStream.Position += len;
+                            reader(br, frame, subIndex);
                         }
 
+                        br.BaseStream.Position = end;
                         break;
                     }
 

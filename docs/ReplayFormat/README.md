@@ -154,7 +154,7 @@ Each state entry begins with:
 
 `Index` refers to the index in the corresponding manifest array (`Players`, `Structures`, etc.)  
 
-`Index` for extensions refers to the ModID defined by the mod using the FNV hash algorithm
+`Index` for extensions refers to the ModID defined by the mod using the FNV hash algorithm.
 
 For `Event` entries, the index is unused and can be ignored on read.
 
@@ -168,6 +168,14 @@ Each state entry is followed by its chunk data:
     bytes ChunkData
 
 `ChunkLength` specifies the exact number of bytes in `ChunkData`.
+
+For Extension chunks:
+
+    int32 SubIndex
+    int32 ChunkLength
+    bytes ChunkData
+
+`SubIndex` here is used the same way the `Index` value is for non-extension chunks.
 
 `ChunkData` contains a sequence of tagged fields.
 Each field is encoded as:
@@ -213,18 +221,33 @@ Structure States:
 
 Player state chunks describe the pose and gameplay state of a player.
 
-| Field       | Type       | Description                                  |
-|-------------|------------|----------------------------------------------|
-| VRRigPos    | Vector3    | Root player rig position                     |
-| VRRigRot    | Quaternion | Root player rig rotation                     |
-| LHandPos    | Vector3    | Left hand position                           |
-| LHandRot    | Quaternion | Left hand rotation                           |
-| RHandPos    | Vector3    | Right hand position                          |
-| RHandRot    | Quaternion | Right hand rotation                          |
-| HeadPos     | Vector3    | Headset position                             |
-| HeadRot     | Quaternion | Headset rotation                             |
-| Health      | int16      | Player’s current health                      |
-| active      | bool       | If the player is active in this frame        |
+| Field               | Type       | Description                                |
+|---------------------|------------|--------------------------------------------|
+| VRRigPos            | Vector3    | Root player rig position                   |
+| VRRigRot            | Quaternion | Root player rig rotation                   |
+| LHandPos            | Vector3    | Left hand world position                   |
+| LHandRot            | Quaternion | Left hand world rotation                   |
+| RHandPos            | Vector3    | Right hand world position                  |
+| RHandRot            | Quaternion | Right hand world rotation                  |
+| HeadPos             | Vector3    | Headset world position                     |
+| HeadRot             | Quaternion | Headset world rotation                     |
+| currentStack        | int16      | Current active stack type                  |
+| Health              | int16      | Player’s current health                    |
+| active              | bool       | Whether the player is active in this frame |
+| activeShiftstoneVFX | byte       | Active shiftstone visual effects (bitmask) |
+| leftShiftstone      | byte       | ID of left equipped shiftstone             |
+| rightShiftstone     | byte       | ID of right equipped shiftstone            |
+| lgripInput          | float      | Left grip input value                      |
+| lindexInput         | float      | Left index trigger input value             |
+| lthumbInput         | float      | Left thumb input value                     |
+| rgripInput          | float      | Right grip input value                     |
+| rindexInput         | float      | Right index trigger input value            |
+| rthumbInput         | float      | Right thumb input value                    |
+| rockCamActive       | bool       | Whether RockCam is active                  |
+| rockCamPos          | Vector3    | RockCam world position                     |
+| rockCamRot          | Quaternion | RockCam world rotation                     |
+| armSpan             | float      | Player arm span measurement                |
+| length              | float      | Player height measurement                  |
 
 ---
 

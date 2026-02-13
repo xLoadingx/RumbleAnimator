@@ -68,7 +68,7 @@ public class ExampleMod : MelonMod
         };
     }
 
-    private void OnWriteFrame(BinaryWriter bw, Frame frame)
+    private void OnWriteFrame(ReplayAPI.FrameExtensionWriter writer, Frame frame)
     {
         // If this frame has no recorded data, write nothing.
         if (!recordedBellFrames.TryGetValue(frame, out var state))
@@ -93,11 +93,14 @@ public class ExampleMod : MelonMod
          * split your data into more than 1 field!
         */
         
-        bw.Write(BellField.Position, state.Position);
-        bw.Write(BellField.Rotation, state.Rotation);
+        writer.WriteChunk(0, w =>
+        {
+            w.Write(BellField.Position, state.Position);
+            w.Write(BellField.Rotation, state.Rotation);
+        });
     }
 
-    private void OnReadFrame(BinaryReader br, Frame frame)
+    private void OnReadFrame(BinaryReader br, Frame frame, int subIndex)
     {
         /*
          * ReadChunk builds a state object for this frame.

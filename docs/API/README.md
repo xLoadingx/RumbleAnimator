@@ -83,6 +83,11 @@ Use this for:
 - Anything that changes over time and frequently
 
 ### Writing Frame Data
+
+Frame data is written using a `FrameExtensionWriter`.
+
+Each call to `WriteChunk` writes one extension chunk for that frame.
+
 ```csharp
 private enum MyField : byte 
 {
@@ -90,29 +95,43 @@ private enum MyField : byte
     Health
 }
 
-private void OnWriteFrame(BinaryWriter bw, Frame frame) 
+private void OnWriteFrame(ReplayAPI.FrameExtensionWriter writer, Frame frame) 
 {
-    bw.Write(MyField.Position, position);
-    bw.Write(MyField.Health, health);
+    writer.WriteChunk(subIndex: 0, w => 
+    {
+        w.Write(MyField.Position, position);
+        w.Write(MyField.Health, health);
+    });
 }
 ```
 
-Each `Write(field, value)` call automatically writes:
-- Field ID (1 byte)
-- Field payload length (1 byte)
-- Field payload (N bytes)
+Each `WriteChunk` call writes:
 
-Only write fields that changed from the previous frame (delta encoding highly recommended)  
-Always use the provided `BinaryWriter.Write(field, value)` overloads.
+- Extension ID
+- SubIndex (int)
+- Payload length (int)
+- Tagged field data
 
-The payload is limited to 255 bytes. Do not use classes/structs as a payload.  
+You may call `WriteChunk` multiple times per frame.
 
-Do not reorder enum field values after release. Only append new enum values to the end.
+The `subIndex` identifies which entity the chunk belongs to.
+
+
+### Important
+
+- Only write fields that changed from the previous frame (delta encoding recommended).
+- Always use the provided `BinaryWriter.Write(field, value)` overloads.
+- Field payload size is limited to 255 bytes.
+- Do not reorder enum field values after release. Keep the numbering of the enum the same if removing/adding fields.
 
 ---
 
 ### Reading Frame Data
-Use `ReplaySerializer.ReadChunk` to reconstruct state:
+
+`OnReadFrame` is invoked once per extension chunk.
+
+If your extension wrote 5 chunks in a frame, `OnReadFrame` will be called 5 times for each chunk.
+
 ```csharp
 private struct MyState 
 {
@@ -131,9 +150,9 @@ private struct MyState
 
 private MyState lastState;
 
-private Dictionary<Frame, MyState> reconstructedFrames = new();
+private Dictionary<(Frame, int), MyState> reconstructedFrames = new();
 
-private void OnReadFrame(BinaryReader br, Frame frame) 
+private void OnReadFrame(BinaryReader br, Frame frame, int subIndex) 
 {
     var state = ReplaySerializer.ReadChunk<MyState, MyField>(
         br,
@@ -152,9 +171,11 @@ private void OnReadFrame(BinaryReader br, Frame frame)
             }
         });
     
-    reconstructedFrames[frame] = state;
+    reconstructedFrames[(frame, subIndex)] = state;
 }
 ```
+
+The `BinaryReader` provided is already scoped to this specific extension chunk.
 
 Unknown fields are automatically skipped.
 

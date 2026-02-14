@@ -800,7 +800,7 @@ public class Main : MelonMod
         heisenhowuserText.name = "HeisenhouswerLogoText";
 
         heisenhowuserText.transform.localPosition = new Vector3(-0.2891f, 0.3969f, -0.1684f);
-        heisenhowuserText.transform.localScale = Vector3.one * 0.2f;
+        heisenhowuserText.transform.localScale = Vector3.one * 0.0035f;
         heisenhowuserText.transform.localRotation = Quaternion.Euler(51.2551f, 110.4334f, 107.2313f);
 
         replayTable.heisenhouserText = heisenhowuserText.GetComponent<TextMeshPro>();

@@ -285,6 +285,16 @@ public class Main : MelonMod
 
     public void OnMapInitialized()
     {
+        recordingIcon = Calls.Create.NewText().GetComponent<TextMeshPro>();
+        recordingIcon.transform.SetParent(LocalPlayer.Controller.GetSubsystem<PlayerUI>().transform.GetChild(0));
+        recordingIcon.name = "Replay Recording Icon";
+        recordingIcon.color = new Color(0, 1, 0, 0);
+        recordingIcon.text = "●";
+        recordingIcon.ForceMeshUpdate();
+        recordingIcon.transform.localPosition = new Vector3(0.2313f, 0.0233f, 0.9604f);
+        recordingIcon.transform.localRotation = Quaternion.Euler(20.2549f, 18.8002f, 0);
+        recordingIcon.transform.localScale = Vector3.one * 0.4f;
+        
         if (((currentScene is "Map0" or "Map1" && (bool)AutoRecordMatches.SavedValue && PlayerManager.instance.AllPlayers.Count > 1) || (currentScene == "Park" && (bool)AutoRecordParks.SavedValue)) && !isReplayScene)
             StartRecording();
 
@@ -350,16 +360,6 @@ public class Main : MelonMod
             replayTable.TableRoot.SetActive(false);
             replayTable.metadataText.gameObject.SetActive(false);
         }
-
-        recordingIcon = Calls.Create.NewText().GetComponent<TextMeshPro>();
-        recordingIcon.transform.SetParent(LocalPlayer.Controller.GetSubsystem<PlayerUI>().transform.GetChild(0));
-        recordingIcon.name = "Replay Recording Icon";
-        recordingIcon.color = new Color(0, 1, 0, 0);
-        recordingIcon.text = "●";
-        recordingIcon.ForceMeshUpdate();
-        recordingIcon.transform.localPosition = new Vector3(0.2313f, 0.0233f, 0.9604f);
-        recordingIcon.transform.localRotation = Quaternion.Euler(20.2549f, 18.8002f, 0);
-        recordingIcon.transform.localScale = Vector3.one * 0.4f;
         
         if (isReplayScene)
         {
@@ -1525,7 +1525,7 @@ public class Main : MelonMod
 
             RecordedPlayers.Add(player);
 
-            MelonCoroutines.Start(Patches.Patch_PlayerController_Initialize.VisualDataDelay(player));
+            MelonCoroutines.Start(Patches.Patch_PlayerVisuals_ApplyPlayerVisuals.VisualDataDelay(player));
         }
 
         Pedestals.AddRange(Utilities.EnumerateMatchPedestals());

@@ -209,15 +209,15 @@ public class Patches
     
     // ----- Late-Player joining/leaving -----
     
-    [HarmonyPatch(typeof(PlayerController), nameof(PlayerController.Initialize))]
-    public class Patch_PlayerController_Initialize
+    [HarmonyPatch(typeof(PlayerVisuals), nameof(PlayerVisuals.ApplyPlayerVisuals))]
+    public class Patch_PlayerVisuals_ApplyPlayerVisuals
     {
-        static void Postfix(PlayerController __instance)
+        static void Postfix(PlayerVisuals __instance)
         {
             if (!Main.isRecording && !Main.isBuffering)
                 return;
 
-            var player = __instance.assignedPlayer;
+            var player = __instance.ParentController.assignedPlayer;
             if (player == null) return;
 
             string id = player.Data.GeneralData.PlayFabMasterId;

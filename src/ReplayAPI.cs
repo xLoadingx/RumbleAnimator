@@ -142,6 +142,26 @@ public static class ReplayAPI
     /// Stops and gets rid of the current replay and its objects.
     /// </summary>
     public static void Stop() => Main.instance.StopReplay();
+
+    /// <summary>
+    /// Starts a new manual recording session.
+    /// </summary>
+    public static void StartRecording() => Main.instance.StartRecording();
+    
+    /// <summary>
+    /// Stops and saves the current recording session to a replay.
+    /// </summary>
+    public static void StopRecording() => Main.instance.StopRecording();
+
+    /// <summary>
+    /// Starts buffering with the user-specified buffer length.
+    /// </summary>
+    public static void StartBuffering() => Main.instance.StartBuffering();
+    
+    /// <summary>
+    /// Saves the current buffer to a replay.
+    /// </summary>
+    public static void SaveBuffer() => Main.instance.SaveReplayBuffer();
     
     /// <summary>
     /// Pauses or resumes playback.

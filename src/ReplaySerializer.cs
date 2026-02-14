@@ -104,35 +104,35 @@ public static class BinaryExtensions
     public static void Write<TField>(this BinaryWriter bw, TField field, Vector3 v) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)12);
+        bw.Write((ushort)12);
         bw.Write(v);
     }
     
     public static void Write<TField>(this BinaryWriter bw, TField field, Quaternion q) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)7);
+        bw.Write((ushort)7);
         bw.Write(q);
     }
     
     public static void Write<TField>(this BinaryWriter bw, TField field, short v) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)2);
+        bw.Write((ushort)2);
         bw.Write(v);
     }
     
     public static void Write<TField>(this BinaryWriter bw, TField field, bool v) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)1);
+        bw.Write((ushort)1);
         bw.Write(v);
     }
 
     public static void Write<TField>(this BinaryWriter bw, TField field, float f) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)4);
+        bw.Write((ushort)4);
         bw.Write(f);
     }
 
@@ -141,42 +141,42 @@ public static class BinaryExtensions
         var bytes = Encoding.UTF8.GetBytes(s);
         
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)bytes.Length);
+        bw.Write((ushort)bytes.Length);
         bw.Write(bytes);
     }
     
     public static void Write<TField>(this BinaryWriter bw, TField field, int v) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)4);
+        bw.Write((ushort)4);
         bw.Write(v);
     }
 
     public static void Write<TField>(this BinaryWriter bw, TField field, byte v) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)1);
+        bw.Write((ushort)1);
         bw.Write(v);
     }
 
     public static void Write<TField>(this BinaryWriter bw, TField field, long v) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)8);
+        bw.Write((ushort)8);
         bw.Write(v);
     }
 
     public static void Write<TField>(this BinaryWriter bw, TField field, double v) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)8);
+        bw.Write((ushort)8);
         bw.Write(v);
     }
     
     public static void Write<TField>(this BinaryWriter bw, TField field, Vector2 v) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)8);
+        bw.Write((ushort)8);
         bw.Write(v.x);
         bw.Write(v.y);
     }
@@ -184,7 +184,7 @@ public static class BinaryExtensions
     public static void Write<TField>(this BinaryWriter bw, TField field, Color32 c) where TField : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)4);
+        bw.Write((ushort)4);
         bw.Write(c.r);
         bw.Write(c.g);
         bw.Write(c.b);
@@ -196,7 +196,7 @@ public static class BinaryExtensions
         where TEnum : Enum
     {
         bw.Write(Convert.ToByte(field));
-        bw.Write((byte)4);
+        bw.Write((ushort)4);
         bw.Write(Convert.ToInt32(value));
     }
 }
@@ -443,6 +443,11 @@ public class ReplaySerializer
         any |= WriteIf(
             FloatChanged(prev.Length, curr.Length),
             () => w.Write(PlayerField.length, curr.Length)
+        );
+
+        any |= WriteIf(
+            !string.Equals(prev.visualData, curr.visualData),
+            () => w.Write(PlayerField.visualData, curr.visualData)
         );
 
         return any;
@@ -1049,7 +1054,7 @@ public class ReplaySerializer
     public static T ReadChunk<T, TField>(
         BinaryReader br, 
         Func<T> ctor, 
-        Action<T, TField, BinaryReader> readField
+        Action<T, TField, ushort, BinaryReader> readField
     ) where TField : Enum
     {
         int len = br.ReadInt32();
@@ -1062,7 +1067,7 @@ public class ReplaySerializer
             byte raw = br.ReadByte();
             TField id = (TField)Enum.ToObject(typeof(TField), raw);
             
-            byte size = br.ReadByte();
+            ushort size = br.ReadUInt16();
             long fieldEnd = br.BaseStream.Position + size;
 
             if (!Enum.IsDefined(typeof(TField), id))
@@ -1071,7 +1076,7 @@ public class ReplaySerializer
                 continue;
             }
 
-            readField(state, id, br);
+            readField(state, id, size, br);
             
             br.BaseStream.Position = fieldEnd;
         }
@@ -1085,7 +1090,7 @@ public class ReplaySerializer
         return ReadChunk<PlayerState, PlayerField>(
             br,
             () => baseState,
-            (p, id, r) =>
+            (p, id, size, r) =>
             {
                 switch (id)
                 {
@@ -1115,6 +1120,13 @@ public class ReplaySerializer
                     case PlayerField.rockCamRot: p.rockCamRot = r.ReadQuaternion(); break;
                     case PlayerField.armSpan: p.ArmSpan = r.ReadSingle(); break;
                     case PlayerField.length: p.Length = r.ReadSingle(); break;
+
+                    case PlayerField.visualData:
+                    {
+                        var bytes = r.ReadBytes(size);
+                        p.visualData = Encoding.UTF8.GetString(bytes);
+                        break;
+                    }
                 }
             }
         );
@@ -1125,7 +1137,7 @@ public class ReplaySerializer
         return ReadChunk<StructureState, StructureField>(
             br,
             () => baseState,
-            (s, id, r) =>
+            (s, id, size, r) =>
             {
                 switch (id)
                 {
@@ -1148,7 +1160,7 @@ public class ReplaySerializer
         return ReadChunk<PedestalState, PedestalField>(
             br,
             () => baseState,
-            (p, id, r) =>
+            (p, id, size, r) =>
             {
                 switch (id)
                 {
@@ -1164,7 +1176,7 @@ public class ReplaySerializer
         return ReadChunk<EventChunk, EventField>(
             br,
             () => new EventChunk(),
-            (e, id, r) =>
+            (e, id, size, r) =>
             {
                 switch (id)
                 {
@@ -1327,6 +1339,8 @@ public class PlayerState
     public float ArmSpan;
     public float Length;
 
+    public string visualData;
+
     public PlayerState Clone()
     {
         return new PlayerState
@@ -1355,7 +1369,8 @@ public class PlayerState
             rockCamPos = rockCamPos,
             rockCamRot = rockCamRot,
             ArmSpan = ArmSpan,
-            Length = Length
+            Length = Length,
+            visualData = visualData
         };
     }
 }
@@ -1368,7 +1383,6 @@ public class PlayerInfo
     
     public string Name;
     public int BattlePoints;
-    public string VisualData;
     public short[] EquippedShiftStones;
     public PlayerMeasurement Measurement;
 
@@ -1382,7 +1396,6 @@ public class PlayerInfo
         MasterId = player.GeneralData.PlayFabMasterId;
         Name = player.GeneralData.PublicUsername;
         BattlePoints = player.GeneralData.BattlePoints;
-        VisualData = player.VisualData.ToPlayfabDataString();
         EquippedShiftStones = player.EquipedShiftStones.ToArray();
         Measurement = player.PlayerMeasurement;
         WasHost = (player.GeneralData.ActorNo == PhotonNetwork.MasterClient?.ActorNumber);
@@ -1427,7 +1440,9 @@ public enum PlayerField : byte {
     rockCamRot,
     
     armSpan,
-    length
+    length,
+    
+    visualData
 }
 
 [Flags]

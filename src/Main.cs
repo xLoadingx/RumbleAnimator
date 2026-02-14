@@ -94,8 +94,7 @@ public class Main : MelonMod
 
     // Players
     public List<Player> RecordedPlayers = new();
-    public Dictionary<string, int> MasterIdToIndex = new();
-    public List<PlayerInfo> PlayerInfos = new();
+    public Dictionary<string, PlayerInfo> PlayerInfos = new();
     public List<StructureInfo> StructureInfos = new();
     
     // Recording FX / timers
@@ -1509,7 +1508,6 @@ public class Main : MelonMod
     {
         RecordedPlayers.Clear();
         Structures.Clear();
-        MasterIdToIndex.Clear();
         PlayerInfos.Clear();
         StructureInfos.Clear();
         Pedestals.Clear();
@@ -1647,7 +1645,7 @@ public class Main : MelonMod
                 MinPing = pingMin,
                 MaxPing = pingMax,
                 TargetFPS = (int)TargetRecordingFPS.SavedValue,
-                Players = PlayerInfos.ToArray(),
+                Players = PlayerInfos.Values.ToArray(),
                 Structures = StructureInfos.ToArray(),
                 Guid = Guid.NewGuid().ToString()
             },
@@ -2223,7 +2221,6 @@ public class Main : MelonMod
 
     public static IEnumerator BuildClone(PlayerInfo pInfo, Action<Clone> callback, Vector3 initialPosition = default)
     {
-        var visualData = string.IsNullOrEmpty(pInfo.VisualData) ? PlayerVisualData.DefaultMale : PlayerVisualData.FromPlayfabDataString(pInfo.VisualData);
         var randomID = Guid.NewGuid().ToString();
         
         pInfo.Name = string.IsNullOrEmpty(pInfo.Name) ? $"Player_{pInfo.MasterId}" : pInfo.Name;
@@ -2245,7 +2242,7 @@ public class Main : MelonMod
             LocalPlayer.Data.RedeemedMoves,
             LocalPlayer.Data.EconomyData,
             shiftstones,
-            visualData
+            PlayerVisualData.Default
         ); 
         
         data.PlayerMeasurement = pInfo.Measurement.Length != 0 ? pInfo.Measurement : LocalPlayer.Data.PlayerMeasurement;
@@ -2553,7 +2550,8 @@ public class Main : MelonMod
                 leftShiftstone = left,
                 rightShiftstone = right,
                 ArmSpan = measurement.ArmSpan,
-                Length = measurement.Length
+                Length = measurement.Length,
+                visualData = p.Data.VisualData.ToPlayfabDataString()
             };
 
             if (recordFingers)
@@ -3437,6 +3435,18 @@ public class Main : MelonMod
                     playbackPlayer.Controller.GetSubsystem<PlayerIK>().VrIK.references.head.position
                 );
             }
+
+            if (!string.Equals(state.visualData, pb.visualData) && !string.IsNullOrEmpty(pb.visualData))
+            {
+                var newVisualData = PlayerVisualData.FromPlayfabDataString(pb.visualData);
+
+                playbackPlayer.Controller.assignedPlayer.Data.VisualData = newVisualData;
+                playbackPlayer.Controller.Initialize(playbackPlayer.Controller.assignedPlayer);
+
+                playbackPlayer.Controller.transform.GetChild(9).gameObject.SetActive(false);
+
+                state.visualData = pb.visualData;
+            }
             
             if (state.active != pb.active)
                 playbackPlayer.Controller.gameObject.SetActive(pb.active);
@@ -3757,6 +3767,7 @@ public class Main : MelonMod
         public int rightShiftstone;
         public bool rockCamActive;
         public PlayerMeasurement playerMeasurement;
+        public string visualData;
     }
 
     public struct PlaybackPedestalState

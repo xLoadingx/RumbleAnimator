@@ -157,7 +157,7 @@ private void OnReadFrame(BinaryReader br, Frame frame, int subIndex)
     var state = ReplaySerializer.ReadChunk<MyState, MyField>(
         br,
         () => lastState?.Clone() ?? new MyState(),
-        (state, field, reader) => 
+        (state, field, fieldSize, reader) => 
         {
             switch (field) 
             {

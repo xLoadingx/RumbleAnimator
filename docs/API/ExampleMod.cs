@@ -118,7 +118,7 @@ public class ExampleMod : MelonMod
         var state = ReplaySerializer.ReadChunk<BellState, BellField>(
             br,
             () => lastState?.Clone() ?? new BellState(),
-            (s, field, reader) =>
+            (s, field, size, reader) =>
             {
                 switch (field)
                 {

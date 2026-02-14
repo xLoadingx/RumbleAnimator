@@ -219,17 +219,7 @@ public class Patches
 
             var player = __instance.ParentController.assignedPlayer;
             if (player == null) return;
-
-            string id = player.Data.GeneralData.PlayFabMasterId;
-
-            if (Main.instance.MasterIdToIndex.TryGetValue(id, out int idx))
-            {
-                Main.instance.RecordedPlayers[idx] = player;
-                return;
-            }
-
-            int index = Main.instance.RecordedPlayers.Count;
-            Main.instance.MasterIdToIndex[id] = index;
+            
             Main.instance.RecordedPlayers.Add(player);
 
             MelonCoroutines.Start(VisualDataDelay(player));
@@ -241,10 +231,9 @@ public class Patches
 
             if (player == null)
                 yield break;
-            
-            var info = new PlayerInfo(player);
 
-            Main.instance.PlayerInfos.Add(info);
+            var id = player.Data.GeneralData.PlayFabMasterId;
+            Main.instance.PlayerInfos[id] = new PlayerInfo(player);
         }
     }
 
@@ -261,8 +250,7 @@ public class Patches
             if (string.IsNullOrEmpty(id))
                 return;
 
-            if (Main.instance.MasterIdToIndex.TryGetValue(id, out int idx))
-                Main.instance.RecordedPlayers[idx] = null;
+            Main.instance.PlayerInfos[id] = null;
         }
     }
     

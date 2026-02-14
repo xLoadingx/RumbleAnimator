@@ -1586,12 +1586,8 @@ public class Main : MelonMod
     {
         if (!isRecording && !isBuffering)
             return null;
-        
-        var marker = new Marker
-        {
-            name = name,
-            time = time
-        };
+
+        var marker = new Marker(name, time, color);
 
         if (isRecording)
             recordingMarkers.Add(marker);
@@ -1631,6 +1627,9 @@ public class Main : MelonMod
 
         foreach (var f in frames)
             f.Time -= startTime;
+
+        foreach (var m in markers)
+            m.time -= startTime;
 
         var replayInfo = new ReplayInfo
         {
@@ -1715,6 +1714,7 @@ public class Main : MelonMod
     {
         SetupRecordingData();
         replayBuffer.Clear();
+        bufferMarkers.Clear();
         isBuffering = true;
     }
     
@@ -2088,7 +2088,8 @@ public class Main : MelonMod
             markerObj.transform.localScale = new Vector3(0.0062f, 1.0836f, 0.0128f);
             markerObj.transform.position = position;
 
-            markerObj.GetComponent<MeshRenderer>().material.SetColor("_Overlay", marker.color);
+            Color markerColor = new Color(marker.r, marker.g, marker.b, 1f);
+            markerObj.GetComponent<MeshRenderer>().material.SetColor("_Overlay", markerColor);
             markerObj.AddComponent<ReplayTag>();
             markerObj.SetActive(true);
         }
@@ -2648,6 +2649,7 @@ public class Main : MelonMod
         SetupRecordingData();
         Frames.Clear();
         Events.Clear();
+        recordingMarkers.Clear();
         isRecording = true;
 
         if (recordingIcon != null)
@@ -2659,12 +2661,6 @@ public class Main : MelonMod
     
     public void StopRecording()
     {
-        if (ReplayRoot != null)
-        {
-            LoggerInstance.Msg("Stopped replay [StopRecording]");
-            StopReplay();
-        }
-        
         isRecording = false;
         SaveReplay(Frames.ToArray(), recordingMarkers, "Recording", onSave: (info, path) => ReplayAPI.ReplaySavedInternal(info, false, path));
 
@@ -2673,7 +2669,6 @@ public class Main : MelonMod
         pingMax = 0;
         pingMin = int.MaxValue;
     }
-    
     
     bool IsFramePose(Transform handA, Transform handB)
     {
@@ -3527,9 +3522,6 @@ public class Main : MelonMod
                     
                     break;
                 }
-                
-                case EventType.Marker:
-                    break;
             }
         }
 

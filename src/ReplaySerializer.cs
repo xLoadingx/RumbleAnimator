@@ -1510,8 +1510,7 @@ public class EventChunk
 
 public enum EventType : byte
 {
-    Marker,
-    OneShotFX
+    OneShotFX = 1
 }
 
 public enum EventField : byte
@@ -1528,12 +1527,22 @@ public enum EventField : byte
 [Serializable]
 public class Marker
 {
-    public string name { get; init; }
-    public float time { get; init; }
-    public Color color { get; init; }
+    public string name { get; set; }
+    public float time { get; set; }
+    public float r, g, b;
 
-    public Vector3? position { get; init; }
-    public int? PlayerIndex { get; init; }
+    public Marker(string name, float time, Color color)
+    {
+        this.name = name;
+        this.time = time;
+        
+        r = color.r;
+        g = color.g;
+        b = color.b;
+    }
+
+    public Vector3? position { get; set; }
+    public int? PlayerIndex { get; set; }
 }
 
 [Serializable]

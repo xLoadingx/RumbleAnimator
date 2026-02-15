@@ -13,7 +13,7 @@ public static class ReplayAPI
     private static readonly List<Extension> _extensions = new();
     
     /// <summary>
-    /// Invoked when a replay is selected from the UI.
+    /// Invoked when a replay is selected from the UI. If header is null, then there is no replay selected.
     /// </summary>
     public static event Action<ReplaySerializer.ReplayHeader> ReplaySelected;
     

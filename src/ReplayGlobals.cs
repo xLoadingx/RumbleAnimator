@@ -700,6 +700,8 @@ public static class ReplayFiles
         var count = explorer.currentReplayPaths.Count;
         var index = explorer.currentIndex;
 
+        ReplaySerializer.ReplayHeader header = null;
+
         if (string.IsNullOrEmpty(path))
         {
             currentHeader = null;
@@ -716,13 +718,12 @@ public static class ReplayFiles
 
             try
             {
-                var header = explorer.currentlySelectedEntry.header;
+                header = explorer.currentlySelectedEntry.header;
                 currentHeader = header;
 
                 table.replayNameText.text = ReplaySerializer.GetReplayDisplayName(path, header);
 
                 Main.instance.replaySettings.Show(path);
-                ReplayAPI.ReplaySelectedInternal(header);
 
                 var format = GetMetadataFormat(header.Scene);
                 table.metadataText.text = ReplaySerializer.FormatReplayString(format, header);
@@ -743,6 +744,8 @@ public static class ReplayFiles
                 Main.instance.replaySettings.gameObject.SetActive(false);
             }
         }
+        
+        ReplayAPI.ReplaySelectedInternal(header);
         
         table.replayNameText.ForceMeshUpdate();
         table.indexText.ForceMeshUpdate();

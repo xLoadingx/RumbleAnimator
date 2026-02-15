@@ -4039,7 +4039,7 @@ public class TimelineScrubber : MonoBehaviour
         
         GetComponentInParent<MeshRenderer>().material?.SetFloat("_BP_Current", time * 1000f);
         
-        if (Main.currentReplay != null)
+        if (Main.isPlaying)
             Main.instance.SetPlaybackTime(time);
     }
     

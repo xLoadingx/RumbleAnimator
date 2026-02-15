@@ -130,6 +130,31 @@ public static class ReplayAPI
     /// </summary>
     public static ReplayInfo CurrentReplay => Main.currentReplay;
 
+    /// <summary>
+    /// Gets the template for the input scene's metadata
+    /// </summary>
+    /// <returns>The untagged metadata template for the input scene</returns>
+    public static string GetMetadataFormat(string sceneName) => ReplayFiles.GetMetadataFormat(sceneName);
+
+    /// <summary>
+    /// Gets the filled-in version of a template from the provided replay header (as shown on the Replay Table)
+    /// </summary>
+    /// <param name="template">The untagged template string</param>
+    /// <param name="replayInfo">The info to fill in the template with</param>
+    /// <returns>Formatted string for the input replay</returns>
+    public static string FormatReplayTemplate(string template, ReplaySerializer.ReplayHeader replayInfo) => 
+        ReplaySerializer.FormatReplayString(template, replayInfo);
+
+    /// <summary>
+    /// Gets the displayed name for a replay (as shown on the Replay Table) using the provided path and info.
+    /// </summary>
+    /// <param name="replayPath">The path to the input replay</param>
+    /// <param name="replayInfo">The header for the input replay</param>
+    /// <param name="alternativeName">Alternate name to use instead of the file name</param>
+    /// <param name="displayTitle">Whether to show the title if the file name starts with 'Replay'</param>
+    /// <returns></returns>
+    public static string GetReplayDisplayName(string replayPath, ReplaySerializer.ReplayHeader replayInfo, string alternativeName = null, bool displayTitle = true) =>
+        ReplaySerializer.GetReplayDisplayName(replayPath, replayInfo, alternativeName, displayTitle);
     
     /// <summary>
     /// Loads and begins playback of the replay at the specified file path.
@@ -137,6 +162,14 @@ public static class ReplayAPI
     /// </summary>
     /// <param name="path">The path to the replay</param>
     public static void Play(string path) => Main.instance.LoadReplay(path);
+
+    /// <summary>
+    /// Loads and begins playback of the currently selected replay on the Replay Table.
+    /// This loads everything necessary for the replay to look correct.
+    /// <see cref="ReplayStarted"/> is called after loading is finished.
+    /// </summary>
+    public static void LoadSelectedReplay() => 
+        Main.instance.LoadSelectedReplay();
     
     /// <summary>
     /// Stops and gets rid of the current replay and its objects.

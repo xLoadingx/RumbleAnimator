@@ -424,7 +424,7 @@ public class Main : MelonMod
             yield return new WaitForSeconds(1f);
         }
 
-        LoadReplay(ReplayFiles.currentReplayPath);
+        LoadReplay(ReplayFiles.explorer.CurrentReplayPath);
         SimpleScreenFadeInstance.Progress = 0f;
     }
 
@@ -437,7 +437,7 @@ public class Main : MelonMod
         
         yield return new WaitForSeconds(1f);
 
-        LoadReplay(ReplayFiles.currentReplayPath);
+        LoadReplay(ReplayFiles.explorer.CurrentReplayPath);
         SimpleScreenFadeInstance.Progress = 0f;
     }
 
@@ -813,12 +813,12 @@ public class Main : MelonMod
 
         crystalizeButtonComp.OnPressed.AddListener((UnityAction)(() =>
         {
-            if (!ReplayCrystals.Crystals.Any(c => c != null && c.ReplayPath == ReplayFiles.currentReplayPath) && ReplayFiles.currentHeader != null && ReplayFiles.currentIndex != -1)
+            if (!ReplayCrystals.Crystals.Any(c => c != null && c.ReplayPath == ReplayFiles.explorer.CurrentReplayPath) && ReplayFiles.currentHeader != null && ReplayFiles.explorer.currentIndex != -1)
             {
                 AudioManager.instance.Play(ReplayCache.SFX["Call_DressingRoom_Bake_Part"], crystalizeButton.transform.position);
 
                 var header = ReplayFiles.currentHeader;
-                ReplayCrystals.CreateCrystal(replayTable.transform.position + new Vector3(0, 0.3f, 0), header, ReplayFiles.currentReplayPath, true);
+                ReplayCrystals.CreateCrystal(replayTable.transform.position + new Vector3(0, 0.3f, 0), header, ReplayFiles.explorer.CurrentReplayPath, true);
             }
             else
             {
@@ -1299,12 +1299,12 @@ public class Main : MelonMod
         deleteButtonComp.OnPressed.RemoveAllListeners();
         deleteButtonComp.OnPressed.AddListener((UnityAction)(() =>
         {
-            if (ReplayFiles.currentIndex != -1)
+            if (ReplayFiles.explorer.currentIndex != -1)
             {
                 if (crystalBreakCoroutine == null)
                 {
-                    ReplayCrystals.Crystal crystal = ReplayCrystals.Crystals.FirstOrDefault(c => c.ReplayPath == ReplayFiles.currentReplayPath);
-                    crystalBreakCoroutine = MelonCoroutines.Start(ReplayCrystals.CrystalBreakAnimation(ReplayFiles.currentReplayPath, crystal));
+                    ReplayCrystals.Crystal crystal = ReplayCrystals.Crystals.FirstOrDefault(c => c.ReplayPath == ReplayFiles.explorer.CurrentReplayPath);
+                    crystalBreakCoroutine = MelonCoroutines.Start(ReplayCrystals.CrystalBreakAnimation(ReplayFiles.explorer.CurrentReplayPath, crystal));
                 }
             }
             else 
@@ -1382,7 +1382,7 @@ public class Main : MelonMod
         copyPathButtonComp.onPressed.RemoveAllListeners();
         copyPathButtonComp.onPressed.AddListener((UnityAction)(() =>
         {
-            GUIUtility.systemCopyBuffer = ReplayFiles.currentReplayPath;
+            GUIUtility.systemCopyBuffer = ReplayFiles.explorer.CurrentReplayPath;
         }));
         
         replaySettings = replaySettingsPanel.AddComponent<ReplaySettings>();
@@ -1401,7 +1401,7 @@ public class Main : MelonMod
         renameButtonComp.onToggleTrueAudioCall = ReplayCache.SFX["Call_GearMarket_GenericButton_Press"];
         renameButtonComp.onToggleStateChanged.AddListener((UnityAction<bool>)((bool toggleState) =>
         {
-            if (ReplayFiles.currentIndex != -1)
+            if (ReplayFiles.explorer.currentIndex != -1)
             {
                 replaySettings.OnRenamePressed(!toggleState);
             }
@@ -1727,7 +1727,7 @@ public class Main : MelonMod
 
     public void LoadSelectedReplay()
     {
-        if (ReplayFiles.currentIndex == -1)
+        if (ReplayFiles.explorer.currentIndex == -1)
         {
             ReplayError("Could not find file.");
             return;
@@ -1814,7 +1814,7 @@ public class Main : MelonMod
                 MelonCoroutines.Start(
                     Utilities.LoadMap(sceneIndex, 2.5f, () =>
                     {
-                        LoadReplay(ReplayFiles.currentReplayPath);
+                        LoadReplay(ReplayFiles.explorer.CurrentReplayPath);
                         ReplayFiles.ShowMetadata();
 
                         switch (targetScene)
@@ -1883,7 +1883,7 @@ public class Main : MelonMod
             if (currentScene == "Park")
                 MelonCoroutines.Start(DelayedParkLoad());
             else
-                LoadReplay(ReplayFiles.currentReplayPath);
+                LoadReplay(ReplayFiles.explorer.CurrentReplayPath);
             
             SimpleScreenFadeInstance.Progress = 0f;
         }
@@ -3940,7 +3940,7 @@ public class ReplayTable : MonoBehaviour
 
             if (target == null && !SceneManager.instance.IsLoadingScene)
             {
-                if (ReplayFiles.metadataHidden && ReplayFiles.currentIndex != -1)
+                if (ReplayFiles.metadataHidden && ReplayFiles.explorer.currentIndex != -1)
                     ReplayFiles.ShowMetadata();
 
                 isReadingCrystal = false;

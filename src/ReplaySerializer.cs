@@ -738,18 +738,31 @@ public class ReplaySerializer
 
         return FormatReplayString(pattern, header);
     }
+
+    public static string GetMapName(string path = null, ReplayHeader header = null)
+    {
+        if (string.IsNullOrEmpty(path) && header == null)
+            return null;
+        
+        header ??= GetManifest(path);
+
+        if (!string.IsNullOrEmpty(header.CustomMap))
+        {
+            if (header.CustomMap.StartsWith("1|"))
+                return "Unknown Custom Map";
+
+            if (header.Scene == "FlatLandSingle")
+                return "FlatLand";
+            
+            return header.CustomMap;
+        }
+
+        return Utilities.GetFriendlySceneName(header.Scene);
+    }
     
     public static string FormatReplayString(string pattern, ReplayHeader header)
     {
-        var scene = Utilities.GetFriendlySceneName(header.Scene);
-        var customMap = header.CustomMap;
-        var finalScene = string.IsNullOrEmpty(customMap) ? scene : customMap;
-        
-        if (finalScene == "FlatLandSingle")
-            finalScene = "FlatLand";
-
-        if (finalScene.StartsWith("1|"))
-            finalScene = "Unknown Custom Map";
+        var finalScene = GetMapName(header: header);
         
         var parsedDate = string.IsNullOrEmpty(header.Date)
             ? DateTime.MinValue

@@ -456,8 +456,6 @@ public static class ReplayFiles
 {
     public static string replayFolder = $"{MelonEnvironment.UserDataDirectory}/ReplayMod";
     
-    public static List<string> replayPaths = new();
-    public static int currentIndex = -1;
     public static ReplayTable table;
     public static bool metadataLerping = false;
     public static bool metadataHidden = false;
@@ -467,7 +465,8 @@ public static class ReplayFiles
     public static bool reloadQueued;
     public static bool suppressWatcher;
 
-    public static string currentReplayPath = null;
+    public static ReplayExplorer explorer;
+
     public static ReplaySerializer.ReplayHeader currentHeader = null;
 
     
@@ -479,6 +478,8 @@ public static class ReplayFiles
         
         EnsureDefaultFormats();
         StartWatchingReplays();
+
+        explorer = new ReplayExplorer(Path.Combine(replayFolder, "Replays"));
     }
 
     public static void EnsureDefaultFormats()
@@ -560,30 +561,6 @@ public static class ReplayFiles
         };
     }
     
-
-    public static ReplaySerializer.ReplayHeader GetManifest(string path)
-    {
-        var header = ReplaySerializer.GetManifest(path);
-        
-        if (string.IsNullOrEmpty(header.Title))
-        {
-            string scene = header.Scene;
-
-            string pattern = scene switch
-            {
-                "Gym" => LoadFormatFile("AutoNameFormats/gym"),
-                "Park" => LoadFormatFile("AutoNameFormats/park"),
-                "Map0" or "Map1" => LoadFormatFile("AutoNameFormats/match"),
-                _ => null
-            };
-
-            header.Title = ReplaySerializer.FormatReplayString(pattern, header);
-        }
-        
-        return header;
-    }
-    
-
     // ----- Metadata -----
     
     static void StartWatchingReplays()
@@ -615,7 +592,6 @@ public static class ReplayFiles
             yield return null;
 
             reloadQueued = false;
-            ReloadReplays();
         }
         
         if (reloadQueued || suppressWatcher) return;
@@ -626,7 +602,7 @@ public static class ReplayFiles
 
     static void OnFormatChanged(object sender, FileSystemEventArgs e)
     {
-        if (string.IsNullOrEmpty(currentReplayPath) || currentHeader == null)
+        if (string.IsNullOrEmpty(explorer.CurrentReplayPath) || currentHeader == null)
             return;
 
         var format = GetMetadataFormat(currentHeader.Scene);
@@ -634,7 +610,6 @@ public static class ReplayFiles
         table.metadataText.ForceMeshUpdate();
     }
     
-
     public static void HideMetadata()
     {
         if (table.metadataText == null || metadataLerping) return;
@@ -716,120 +691,115 @@ public static class ReplayFiles
     
     // ----- Replay Selection -----
     
-    public static void SelectReplay(int index)
+    private static void SelectReplayFromExplorer()
     {
-        if (table.replayNameText == null) return;
-        
-        if (index < 0 || index >= replayPaths.Count)
+        if (table.replayNameText == null)
+            return;
+
+        var path = explorer.CurrentReplayPath;
+        var count = explorer.currentReplayPaths.Count;
+        var index = explorer.currentIndex;
+
+        if (string.IsNullOrEmpty(path))
         {
-            currentIndex = -1;
-            currentReplayPath = null;
+            currentHeader = null;
+
             table.replayNameText.text = "No Replay Selected";
-            table.indexText.text = $"(0 / {replayPaths.Count})";
+            table.indexText.text = $"(0 / {count})";
             HideMetadata();
             Main.instance.replaySettings.gameObject.SetActive(false);
         }
         else
         {
-            currentIndex = index;
-            currentReplayPath = replayPaths[index];
-
-            int shownIndex = currentIndex < 0 ? 0 : currentIndex + 1;
-            table.indexText.text = $"({shownIndex} / {replayPaths.Count})";
+            int shownIndex = index < 0 ? 0 : index + 1;
+            table.indexText.text = $"({shownIndex} / {count})";
 
             try
             {
-                var header = GetManifest(currentReplayPath);
+                var header = explorer.currentlySelectedEntry.header;
                 currentHeader = header;
-                table.replayNameText.text = ReplaySerializer.GetReplayDisplayName(currentReplayPath, currentHeader);
-                Main.instance.replaySettings.Show(currentReplayPath);
 
+                table.replayNameText.text = ReplaySerializer.GetReplayDisplayName(path, header);
+
+                Main.instance.replaySettings.Show(path);
                 ReplayAPI.ReplaySelectedInternal(header);
-                
+
                 var format = GetMetadataFormat(header.Scene);
                 table.metadataText.text = ReplaySerializer.FormatReplayString(format, header);
+
                 ShowMetadata();
                 Main.instance.replaySettings.gameObject.SetActive(true);
             }
             catch (Exception e)
             {
-                Main.instance.LoggerInstance.Error($"Failed to load replay `{currentReplayPath}':{e}");
-                
+                Main.instance.ReplayError($"Failed to load replay `{path}`: {e}");
+
+                explorer.Select(-1);
+                currentHeader = null;
+
                 table.replayNameText.text = "Invalid Replay";
-                table.indexText.text = "Invalid Replay";
+                table.indexText.text = $"(0 / {count})";
                 HideMetadata();
                 Main.instance.replaySettings.gameObject.SetActive(false);
-                currentReplayPath = null;
-                currentIndex = -1;
             }
         }
         
         table.replayNameText.ForceMeshUpdate();
         table.indexText.ForceMeshUpdate();
         table.metadataText.ForceMeshUpdate();
-        ApplyTMPSettings(table.replayNameText, 5f, 0.51f, true);
-        ApplyTMPSettings(table.indexText, 5f, 0.51f, false);
-        ApplyTMPSettings(table.metadataText, 15f, 2f, true);
-        table.metadataText.enableAutoSizing = true;
+    }
+
+    public static void ReloadReplays()
+    {
+        var previousGuid = currentHeader?.Guid;
+
+        explorer.Refresh();
+
+        if (!string.IsNullOrEmpty(previousGuid))
+        {
+            int newIndex = explorer.currentReplayPaths
+                .Select((path, i) => new { path, i })
+                .FirstOrDefault(x =>
+                {
+                    var header = ReplaySerializer.GetManifest(x.path);
+                    return header.Guid == previousGuid;
+                })?.i ?? -1;
+
+            explorer.Select(newIndex);
+        }
+        else
+        {
+            explorer.Select(-1);
+        }
+        
+        SelectReplayFromExplorer();
+    }
+    
+    public static void SelectReplay(int index)
+    {
+        explorer.Select(index);
+        SelectReplayFromExplorer();
     }
 
     public static void NextReplay()
     {
-        if (replayPaths.Count == 0) return;
-
-        int nextIndex = currentIndex + 1;
-        if (nextIndex > replayPaths.Count - 1)
-            nextIndex = -1;
-
-        SelectReplay(nextIndex);
+        explorer.Next();
+        SelectReplayFromExplorer();
     }
 
     public static void PreviousReplay()
     {
-        if (replayPaths.Count == 0) return;
-
-        int previousIndex = currentIndex - 1;
-        if (previousIndex < -1)
-            previousIndex = replayPaths.Count - 1;
-        
-        SelectReplay(previousIndex);
+        explorer.Previous();
+        SelectReplayFromExplorer();
     }
     
 
     public static void LoadReplays()
     {
-        replayPaths = Directory
-            .GetFiles(Path.Combine(replayFolder, "Replays"), "*.replay", SearchOption.AllDirectories)
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .ToList();
-
-        currentIndex = Clamp(currentIndex, -1, replayPaths.Count - 1);
-
-        SelectReplay(currentIndex);
-    }
-
-    public static void ReloadReplays()
-    {
-        LoadReplays();
-
-        if (!string.IsNullOrEmpty(currentReplayPath))
-        {
-            int newIndex = replayPaths.FindIndex(p =>
-            {
-                var header = ReplaySerializer.GetManifest(p);
-                return header.Guid == currentHeader?.Guid;
-            });
-            currentIndex = newIndex >= 0 ? newIndex : -1;
-        }
-        else
-        {
-            currentIndex = -1;
-        }
-
-        SelectReplay(currentIndex);
+        explorer.Refresh();
+        SelectReplayFromExplorer();
     }
     
-
     static void ApplyTMPSettings(TextMeshPro text, float horizontal, float vertical, bool apply)
     {
         if (text == null) return;
@@ -848,6 +818,164 @@ public static class ReplayFiles
             text.enableAutoSizing = true;
             text.autoSizeTextContainer = true;
         }
+    }
+}
+
+public class ReplayExplorer
+{
+    public string RootPath { get; }
+    public string CurrentFolderPath { get; private set; }
+
+    public List<string> currentReplayPaths = new();
+    public List<Entry> currentReplayEntries = new();
+    public int currentIndex = -1;
+
+    public enum SortingType
+    {
+        NameAscending,
+        NameDescending,
+        
+        DateNewestFirst,
+        DateOldestFirst,
+        
+        DurationLongestFirst,
+        DurationShortestFirst,
+        
+        MapAscending,
+        PlayerCountDescending
+    }
+
+    public string CurrentReplayPath =>
+        currentIndex >= 0 && currentIndex < currentReplayPaths.Count
+            ? currentReplayPaths[currentIndex]
+            : null;
+
+    public Entry currentlySelectedEntry =>
+        currentIndex >= 0 && currentIndex < currentReplayEntries.Count
+            ? currentReplayEntries[currentIndex]
+            : null;
+
+    public ReplayExplorer(string root)
+    {
+        RootPath = root;
+        CurrentFolderPath = root;
+        Refresh();
+    }
+
+    public void Refresh()
+    {
+        currentReplayEntries = GetEntries();
+        currentReplayPaths = currentReplayEntries.Select(e => e.FullPath).ToList();
+        
+        currentIndex = Clamp(currentIndex, -1, currentReplayPaths.Count - 1);
+    }
+
+    public List<Entry> GetEntries(SortingType sorting = SortingType.DateNewestFirst)
+    {
+        var folders = Directory
+            .GetDirectories(CurrentFolderPath)
+            .Select(dir => new Entry
+            {
+                Name = Path.GetFileName(dir), 
+                FullPath = dir, 
+                IsFolder = true
+            })
+            .OrderBy(e => e.Name)
+            .ToList();
+        
+        var files = Directory
+            .GetFiles(CurrentFolderPath, "*.replay")
+            .Select(file => new Entry
+            {
+                Name = Path.GetFileNameWithoutExtension(file),
+                FullPath = file,
+                header = ReplaySerializer.GetManifest(file),
+                IsFolder = false,
+            })
+            .ToList();
+
+        files = SortFiles(files, sorting);
+
+        currentReplayEntries = files;
+
+        folders.AddRange(files);
+        return folders;
+    }
+
+    private List<Entry> SortFiles(List<Entry> files, SortingType sorting)
+    {
+        return sorting switch
+        {
+            SortingType.NameAscending => files.OrderBy(f => f.Name).ToList(),
+            SortingType.NameDescending => files.OrderByDescending(f => f.Name).ToList(),
+
+            SortingType.DateNewestFirst => files.OrderBy(f => File.GetLastWriteTimeUtc(f.FullPath)).ToList(),
+            SortingType.DateOldestFirst => files.OrderByDescending(f => File.GetLastWriteTimeUtc(f.FullPath)).ToList(),
+
+            SortingType.DurationLongestFirst => files.OrderByDescending(f => f.header.Duration).ToList(),
+            SortingType.DurationShortestFirst => files.OrderByDescending(f => f.header.Duration).ToList(),
+
+            SortingType.MapAscending => files.OrderBy(f => ReplaySerializer.GetMapName(header: f.header), StringComparer.OrdinalIgnoreCase).ToList(),
+            SortingType.PlayerCountDescending => files.OrderByDescending(f => f.header.Players?.Length).ToList(),
+
+            _ => files
+        };
+    }
+
+    public void Enter(string path)
+    {
+        if (!Directory.Exists(path)) return;
+        CurrentFolderPath = path;
+        currentIndex = -1;
+        Refresh();
+    }
+
+    public void GoUp()
+    {
+        var parent = Directory.GetParent(CurrentFolderPath);
+        if (parent != null)
+        {
+            CurrentFolderPath = parent.FullName;
+            currentIndex = -1;
+            Refresh();
+        }
+    }
+
+    public void Next()
+    {
+        if (currentReplayPaths.Count == 0) return;
+
+        currentIndex++;
+        if (currentIndex > currentReplayPaths.Count - 1)
+            currentIndex = -1;
+    }
+
+    public void Previous()
+    {
+        if (currentReplayPaths.Count == 0) return;
+        
+        currentIndex--;
+        if (currentIndex < -1)
+            currentIndex = currentReplayPaths.Count - 1;
+    }
+
+    public void Select(int index)
+    {
+        if (index < -1 || index >= currentReplayPaths.Count)
+            currentIndex = -1;
+        else
+            currentIndex = index;
+    }
+
+    public IEnumerable<string> GetSubFolders()
+        => Directory.GetDirectories(CurrentFolderPath);
+
+    public class Entry
+    {
+        public string Name;
+        public string FullPath;
+        public ReplaySerializer.ReplayHeader header;
+        public bool IsFolder;
     }
 }
 
@@ -1465,7 +1593,9 @@ public static class ReplayCrystals
         lookAt.lockX = true;
         lookAt.lockZ = true;
                 
-        crystal.ReplayPath = ReplayFiles.currentReplayPath;
+        crystal.ReplayPath = ReplayFiles.explorer.CurrentReplayPath;
+        
+        ReplayFiles.explorer.Next();
 
         if (applyRandomColor)
         {
@@ -1569,7 +1699,7 @@ public static class ReplayCrystals
             Utilities.EaseInOut,
             () =>
             {
-                int index = ReplayFiles.replayPaths.IndexOf(crystal.ReplayPath);
+                int index = ReplayFiles.explorer.currentReplayPaths.IndexOf(crystal.ReplayPath);
                 
                 if (index != -1)
                     ReplayFiles.SelectReplay(index);

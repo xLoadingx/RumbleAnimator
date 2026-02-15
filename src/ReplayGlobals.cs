@@ -747,6 +747,10 @@ public static class ReplayFiles
         table.replayNameText.ForceMeshUpdate();
         table.indexText.ForceMeshUpdate();
         table.metadataText.ForceMeshUpdate();
+        ApplyTMPSettings(table.replayNameText, 5f, 0.51f, true);
+        ApplyTMPSettings(table.indexText, 5f, 0.51f, false);
+        ApplyTMPSettings(table.metadataText, 15f, 2f, true);
+        table.metadataText.enableAutoSizing = true;
     }
 
     public static void ReloadReplays()

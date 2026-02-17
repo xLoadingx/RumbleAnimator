@@ -744,8 +744,8 @@ public static class ReplayFiles
                 Main.instance.replaySettings.gameObject.SetActive(false);
             }
         }
-        
-        ReplayAPI.ReplaySelectedInternal(header);
+
+        ReplayAPI.ReplaySelectedInternal(header, path);
         
         table.replayNameText.ForceMeshUpdate();
         table.indexText.ForceMeshUpdate();
@@ -1833,6 +1833,7 @@ public static class ReplayCrystals
 
         File.Delete(replayPath);
         ReplayAPI.ReplayDeletedInternal(replayPath);
+        ReplayFiles.ReloadReplays();
 
         Main.instance.crystalBreakCoroutine = null;
     }

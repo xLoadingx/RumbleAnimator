@@ -13,30 +13,30 @@ public static class ReplayAPI
     private static readonly List<Extension> _extensions = new();
     
     /// <summary>
-    /// Invoked when a replay is selected from the UI. If header is null, then there is no replay selected.
+    /// Invoked when a replay is selected from the UI. If header / path is null, then there is no replay selected.
     /// </summary>
-    public static event Action<ReplaySerializer.ReplayHeader> ReplaySelected;
+    public static event Action<ReplaySerializer.ReplayHeader, string> onReplaySelected;
     
     /// <summary>
     /// Invoked when playback begins for a replay.
     /// Everything for the replay is loaded at this point.
     /// </summary>
-    public static event Action<ReplayInfo> ReplayStarted;
+    public static event Action<ReplayInfo> onReplayStarted;
     
     /// <summary>
     /// Invoked when playback is stopped and all replay objects are destroyed.
     /// </summary>
-    public static event Action<ReplayInfo> ReplayEnded;
+    public static event Action<ReplayInfo> onReplayEnded;
     
     /// <summary>
     /// Invoked when the playback time changes (seek or progression).
     /// </summary>
-    public static event Action<float> ReplayTimeChanged;
+    public static event Action<float> onReplayTimeChanged;
     
     /// <summary>
     /// Invoked when playback is paused or resumed, along with the new toggle state.
     /// </summary>
-    public static event Action<bool> ReplayPauseChanged;
+    public static event Action<bool> onReplayPauseChanged;
 
     /// <summary>
     /// Invoked for every frame during playback.
@@ -53,30 +53,30 @@ public static class ReplayAPI
     /// <summary>
     /// Invoked after a replay is saved to disk.
     /// </summary>
-    public static event Action<ReplayInfo, bool, string> ReplaySaved;
+    public static event Action<ReplayInfo, bool, string> onReplaySaved;
     
     /// <summary>
     /// Invoked after a replay file is deleted, along with its path.
     /// </summary>
-    public static event Action<string> ReplayDeleted;
+    public static event Action<string> onReplayDeleted;
     
     /// <summary>
     /// Invoked after a replay is renamed, along with its new path.
     /// </summary>
-    public static event Action<ReplaySerializer.ReplayHeader, string> ReplayRenamed;
+    public static event Action<ReplaySerializer.ReplayHeader, string> onReplayRenamed;
 
-    internal static void ReplaySelectedInternal(ReplaySerializer.ReplayHeader info) => ReplaySelected?.Invoke(info);
-    internal static void ReplayStartedInternal(ReplayInfo info) => ReplayStarted?.Invoke(info);
-    internal static void ReplayEndedInternal(ReplayInfo info) => ReplayEnded?.Invoke(info);
-    internal static void ReplayTimeChangedInternal(float time) => ReplayTimeChanged?.Invoke(time);
-    internal static void ReplayPauseChangedInternal(bool paused) => ReplayPauseChanged?.Invoke(paused);
+    internal static void ReplaySelectedInternal(ReplaySerializer.ReplayHeader info, string path) => onReplaySelected?.Invoke(info, path);
+    internal static void ReplayStartedInternal(ReplayInfo info) => onReplayStarted?.Invoke(info);
+    internal static void ReplayEndedInternal(ReplayInfo info) => onReplayEnded?.Invoke(info);
+    internal static void ReplayTimeChangedInternal(float time) => onReplayTimeChanged?.Invoke(time);
+    internal static void ReplayPauseChangedInternal(bool paused) => onReplayPauseChanged?.Invoke(paused);
 
     internal static void OnPlaybackFrameInternal(Frame frame) => OnPlaybackFrame?.Invoke(frame);
     internal static void OnRecordFrameInternal(Frame frame, bool isBuffer) => OnRecordFrame?.Invoke(frame, isBuffer);
     
-    internal static void ReplaySavedInternal(ReplayInfo info, bool isBuffer, string path) => ReplaySaved?.Invoke(info, isBuffer, path);
-    internal static void ReplayDeletedInternal(string path) => ReplayDeleted?.Invoke(path);
-    internal static void ReplayRenamedInternal(ReplaySerializer.ReplayHeader header, string newPath) => ReplayRenamed?.Invoke(header, newPath);
+    internal static void ReplaySavedInternal(ReplayInfo info, bool isBuffer, string path) => onReplaySaved?.Invoke(info, isBuffer, path);
+    internal static void ReplayDeletedInternal(string path) => onReplayDeleted?.Invoke(path);
+    internal static void ReplayRenamedInternal(ReplaySerializer.ReplayHeader header, string newPath) => onReplayRenamed?.Invoke(header, newPath);
 
     /// <summary>
     /// Gets whether a recording is currently active.
@@ -166,7 +166,7 @@ public static class ReplayAPI
     /// <summary>
     /// Loads and begins playback of the currently selected replay on the Replay Table.
     /// This loads everything necessary for the replay to look correct.
-    /// <see cref="ReplayStarted"/> is called after loading is finished.
+    /// <see cref="onReplayStarted"/> is called after loading is finished.
     /// </summary>
     public static void LoadSelectedReplay() => 
         Main.instance.LoadSelectedReplay();

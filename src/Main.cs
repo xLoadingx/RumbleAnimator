@@ -445,7 +445,7 @@ public class Main : MelonMod
     {
         replayMod.ModName = BuildInfo.Name;
         replayMod.ModVersion = BuildInfo.Version;
-        replayMod.ModFormatVersion = BuildInfo.FormatVersion;
+        replayMod.ModFormatVersion = BuildInfo.Version;
 
         replayMod.SetFolder("ReplayMod/Settings");
         replayMod.AddDescription("Description", "", "A mod that records scenes into a 3d file that you can replay", new Tags { IsSummary = true });
@@ -462,11 +462,11 @@ public class Main : MelonMod
         var automaticMarkersFolder = replayMod.AddFolder("Automatic Markers", "Automatically adds markers to replays when notable events occur.");
 
         var matchEndFolder = replayMod.AddFolder("Match End", "Settings for markers added when a match ends.");
-        EnableMatchEndMarker = replayMod.AddToList("Enable Match End Marker", false, 0, "Automatically adds a marker at the end of a match.", new Tags());
+        EnableMatchEndMarker = replayMod.AddToList("Enable Match End Marker", true, 0, "Automatically adds a marker at the end of a match.", new Tags());
         matchEndFolder.AddSetting(EnableMatchEndMarker);
 
         var roundEndFolder = replayMod.AddFolder("Round End", "Settings for markers added at the end of each round.");
-        EnableRoundEndMarker = replayMod.AddToList("Enable Round End Marker", false, 0, "Automatically adds a marker at the end of a round.", new Tags());
+        EnableRoundEndMarker = replayMod.AddToList("Enable Round End Marker", true, 0, "Automatically adds a marker at the end of a round.", new Tags());
         roundEndFolder.AddSetting(EnableRoundEndMarker);
 
         var largeDamageFolder = replayMod.AddFolder("Large Damage", "Settings for markers triggered by bursts of high damage.");
@@ -3000,7 +3000,7 @@ public class Main : MelonMod
         {
             TimeSpan t = TimeSpan.FromSeconds(elapsedPlaybackTime);
             
-            ReplayPlaybackControls.totalDuration.text = t.TotalHours >= 1 ? 
+            ReplayPlaybackControls.currentDuration.text = t.TotalHours >= 1 ? 
                 $"{(int)t.TotalHours}:{t.Minutes:D2}:{t.Seconds:D2}" : 
                 $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
         }

@@ -40,10 +40,10 @@ public class ExampleMod : MelonMod
         // Called every frame during recording/buffering
         ReplayAPI.OnRecordFrame += OnRecordFrame;
         
-        // Called eveyr frame during playback
+        // Called every frame during playback
         ReplayAPI.OnPlaybackFrame += OnPlaybackFrame;
 
-        ReplayAPI.ReplayEnded += _ =>
+        ReplayAPI.onReplayEnded += _ =>
         {
             recordedBellFrames.Clear();
             reconstructedBellFrames.Clear();

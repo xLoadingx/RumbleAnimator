@@ -25,6 +25,7 @@ using Il2CppTMPro;
 using MelonLoader;
 using RumbleModdingAPI;
 using RumbleModUI;
+using RumbleModUIPlus;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.InputSystem.XR;
@@ -157,7 +158,7 @@ public class Main : MelonMod
     
     public const float errorsArmspan = 1.2744f;
     
-    private Mod replayMod = new();
+    public static Mod replayMod = new();
 
     // Recording
     public ModSetting<int> TargetRecordingFPS = new();
@@ -195,6 +196,7 @@ public class Main : MelonMod
     
     // Other
     public ModSetting<float> tableOffset = new();
+    public ModSettingFolder extensionsFolder;
     
     // ------------
 
@@ -1200,6 +1202,8 @@ public class Main : MelonMod
         slideOutTextComp.fontSizeMin = 1f;
         slideOutTextComp.ForceMeshUpdate();
 
+        ReplaySettings.playerTags.Clear();
+        
         for (int i = 0; i < 4; i++)
         {
             int index = i;
@@ -1217,6 +1221,8 @@ public class Main : MelonMod
             var button = playerTag.transform.GetChild(0).GetComponent<InteractionButton>();
             button.onPressed.RemoveAllListeners();
             button.onPressed.AddListener((UnityAction)(() => { ReplaySettings.selectedPlayer = ReplaySettings.PlayerAtIndex(index).player; }));
+
+            ReplaySettings.playerTags.Add(button.transform.parent.GetComponent<PlayerTag>());
         }
 
         var nextPageButton = GameObject.Instantiate(playButton, slideOutPanel.transform);
@@ -1433,7 +1439,6 @@ public class Main : MelonMod
         bundle.Unload(false);
     }
     
-    
     public void PlayClapperboardVFX(Vector3 position, Quaternion rotation)
     {
         var clapperboard = GameObject.Instantiate(clapperboardVFX);
@@ -1645,12 +1650,25 @@ public class Main : MelonMod
                 MinPing = pingMin,
                 MaxPing = pingMax,
                 TargetFPS = (int)TargetRecordingFPS.SavedValue,
-                Players = PlayerInfos.Values.ToArray(),
                 Structures = StructureInfos.ToArray(),
                 Guid = Guid.NewGuid().ToString()
             },
             Frames = frames
         };
+
+        var orderedInfos = new List<PlayerInfo>();
+        
+        foreach (var player in RecordedPlayers)
+        {
+            if (player == null) continue;
+
+            var id = player.Data.GeneralData.PlayFabMasterId;
+
+            if (PlayerInfos.TryGetValue(id, out var info))
+                orderedInfos.Add(info);
+        }
+
+        replayInfo.Header.Players = orderedInfos.ToArray();
         
         replayInfo.Header.MarkerCount = markers.Count;
         replayInfo.Header.Markers = markers.ToArray();
@@ -2264,7 +2282,7 @@ public class Main : MelonMod
         GameObject Head = Overall.transform.GetChild(0).GetChild(0).gameObject;
 
         GameObject.Destroy(Overall.GetComponent<NetworkGameObject>());
-        Overall.GetComponent<Rigidbody>().isKinematic = true;
+        GameObject.Destroy(Overall.GetComponent<Rigidbody>());
         
         var localTransform = LocalPlayer.Controller.transform;
         newPlayer.Controller.transform.position = localTransform.position;
@@ -3114,7 +3132,7 @@ public class Main : MelonMod
                         var pool = poolManager.GetPool("Parry_VFX");
                         var effect = GameObject.Instantiate(pool.poolItem.gameObject, VFXParent.transform);
 
-                        effect.transform.position = sa.position;
+                        effect.transform.localPosition = sa.position;
                         effect.transform.localRotation = Quaternion.identity;
                         effect.transform.localScale = Vector3.one * vfxSize;
                         effect.GetComponent<VisualEffect>().playRate = Abs(playbackSpeed);
@@ -3234,15 +3252,21 @@ public class Main : MelonMod
             {
                 Vector3 pos = Vector3.Lerp(sa.position, sb.position, t);
                 Quaternion rot = Quaternion.Slerp(sa.rotation, sb.rotation, t);
-                playbackStructure.transform.SetPositionAndRotation(pos, rot);
+
+                playbackStructure.transform.SetLocalPositionAndRotation(pos, rot);
             }
             else
             {
-                playbackStructure.transform.SetPositionAndRotation(sb.position, sb.rotation);
+                playbackStructure.transform.SetLocalPositionAndRotation(sb.position, sb.rotation);
             }
-            
+
             foreach (var vfx in playbackStructure.GetComponentsInChildren<VisualEffect>())
+            {
                 vfx.playRate = Abs(playbackSpeed);
+
+                if (vfx.name.Contains("ExplodeStatus_VFX"))
+                    vfx.transform.localScale = Vector3.one;
+            }
             
             if (structureComp.currentFrictionVFX != null)
                 structureComp.currentFrictionVFX.visualEffect.playRate = Abs(playbackSpeed);
@@ -3271,8 +3295,9 @@ public class Main : MelonMod
                     var pool = PoolManager.instance.GetPool("PlayerHitmarker");
                     var effect = GameObject.Instantiate(pool.poolItem.gameObject, VFXParent.transform);
 
-                    effect.transform.localPosition = playbackPlayer.Head.transform.position - new Vector3(0, 0.5f, 0);
+                    effect.transform.position = playbackPlayer.Head.transform.position - new Vector3(0, 0.5f * ReplayRoot.transform.localScale.y, 0);
                     effect.transform.localRotation = Quaternion.identity;
+                    effect.transform.localScale = Vector3.Scale(effect.transform.localScale, ReplayRoot.transform.localScale);
                     effect.GetComponent<VisualEffect>().playRate = Abs(playbackSpeed);
                     effect.AddComponent<ReplayTag>();
                     effect.gameObject.AddComponent<DeleteAfterSeconds>();
@@ -3418,8 +3443,10 @@ public class Main : MelonMod
                         rockCam.transform.GetChild(j).gameObject.SetActive(state.rockCamActive);
                 }
                 
-                rockCam.transform.position = pb.rockCamPos;
-                rockCam.transform.rotation = pb.rockCamRot;
+                Vector3 pos = Vector3.Lerp(pa.rockCamPos, pb.rockCamPos, t);
+                Quaternion rot = Quaternion.Slerp(pa.rockCamRot, pb.rockCamRot, t);
+                
+                rockCam.transform.SetLocalPositionAndRotation(pos, rot);
             }
 
             if (state.playerMeasurement.ArmSpan != pb.ArmSpan || state.playerMeasurement.Length != pb.Length)
@@ -3487,7 +3514,7 @@ public class Main : MelonMod
             state.active = playbackPedestal.activeSelf;
 
             Vector3 pos = Vector3.Lerp(pa.position, pb.position, t);
-            playbackPedestal.transform.position = pos;
+            playbackPedestal.transform.localPosition = pos;
         }
 
         // ------ Events 
@@ -3563,7 +3590,9 @@ public class Main : MelonMod
             if (effect != null)
             {
                 effect.transform.SetParent(VFXParent.transform);
-                effect.transform.SetPositionAndRotation(position, rotation);
+
+                effect.transform.SetLocalPositionAndRotation(position, rotation);
+                effect.transform.localScale = Vector3.Scale(effect.transform.localScale, ReplayRoot.transform.localScale);
                 
                 var vfx = effect.GetComponent<VisualEffect>();
                 if (vfx != null)
@@ -3798,8 +3827,8 @@ public class Clone : MonoBehaviour
 
     public void ApplyInterpolatedPose(PlayerState a, PlayerState b, float t)
     {
-        VRRig.transform.position = Vector3.Lerp(a.VRRigPos, b.VRRigPos, t);
-        VRRig.transform.rotation = Quaternion.Slerp(a.VRRigRot, b.VRRigRot, t);
+        VRRig.transform.localPosition = Vector3.Lerp(a.VRRigPos, b.VRRigPos, t);
+        VRRig.transform.localRotation =Quaternion.Slerp(a.VRRigRot, b.VRRigRot, t);
         
         Head.transform.localPosition = Vector3.Lerp(a.HeadPos, b.HeadPos, t);
         Head.transform.localRotation = Quaternion.Slerp(a.HeadRot, b.HeadRot, t);

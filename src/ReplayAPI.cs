@@ -3,14 +3,18 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using RumbleModUI;
+using RumbleModUIPlus;
 using UnityEngine;
 using CompressionLevel = System.IO.Compression.CompressionLevel;
+using Tags = RumbleModUIPlus.Tags;
 
 namespace ReplayMod;
 
 public static class ReplayAPI
 {
     private static readonly List<Extension> _extensions = new();
+    private static readonly List<ModSettingFolder> _extensionFolders = new(); 
     
     /// <summary>
     /// Invoked when a replay is selected from the UI. If header / path is null, then there is no replay selected.
@@ -298,6 +302,16 @@ public static class ReplayAPI
             onWriteFrame, 
             onReadFrame)
         );
+
+        Main.instance.extensionsFolder ??= Main.replayMod.AddFolder("Extensions", "Settings for all registered extensions");
+
+        var extensionFolder = Main.replayMod.AddFolder(id, $"Settings for the extension '{id}'");
+        Main.instance.extensionsFolder.AddSetting(extensionFolder);
+
+        var extensionToggle = Main.replayMod.AddToList("Toggle", true, 0, "Toggles the extension on/off", new Tags());
+        extensionFolder.AddSetting(extensionToggle);
+
+        Main.replayMod.GetFromFile();
         
         Main.instance.LoggerInstance.Msg($"Replay Mod: Extension '{id}' created");
 

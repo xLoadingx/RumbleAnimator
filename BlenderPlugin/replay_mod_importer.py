@@ -138,7 +138,7 @@ class PlayerState:
 
     ArmSpan: float = 0.0
     Length: float = 0.0
-    
+
 class PedestalField(IntEnum):
     position = 0
     active = 1
@@ -147,11 +147,11 @@ class PedestalField(IntEnum):
 class PedestalState:
     position: Vector3 = (0, 0, 0)
     active: bool = False
-    
+
 class EventType(IntEnum):
     Marker = 0
     OneShotFX = 1
-    
+
 class EventField(IntEnum):
     type = 0
     position = 1
@@ -161,7 +161,7 @@ class EventField(IntEnum):
     playerIndex = 7
     damage = 8
     fxType = 9
-    
+
 class MarkerType(IntEnum):
     None_ = 0
     Manual = 1
@@ -195,24 +195,24 @@ class FXOneShotType(IntEnum):
 @dataclass
 class EventChunk:
     type: EventType = EventType.OneShotFX
-    
+
     position: Vector3 = (0, 0, 0)
     rotation: Quaternion = (0, 0, 0, 1)
     masterId: Optional[str] = None
     playerIndex: int = -1
-    
+
     markerType: MarkerType = MarkerType.None_
-    
+
     damage: int = 0
-    
+
     fxType: FXOneShotType = FXOneShotType.None_
-    
+
 class ChunkType(IntEnum):
     PlayerState = 0
     StructureState = 1
     PedestalState = 2
     Event = 3
-    
+
 @dataclass
 class Frame:
     time: float
@@ -245,37 +245,37 @@ class ReplayHeader:
 class ReplayInfo:
     header: ReplayHeader
     frames: List[Frame]
-    
+
 def read_vector3(br) -> Vector3:
     return struct.unpack("<fff", br.read(12))
 
 def read_quaternion(br) -> Quaternion:
     a, b, c = struct.unpack("<HHH", br.read(6))
     dropped_index = struct.unpack("<B", br.read(1))[0]
-    
+
     smalls = [
         (a / 65535.0 - 0.5) * 2.0,
         (b / 65535.0 - 0.5) * 2.0,
         (c / 65535.0 - 0.5) * 2.0,
-    ]
-    
+        ]
+
     components = [0.0, 0.0, 0.0, 0.0]
-    
+
     s = 0
     for i in range(4):
         if i == dropped_index:
             continue
         components[i] = smalls[s]
         s += 1
-    
+
     sum_squares = sum(
         components[i] * components[i]
         for i in range(4)
         if i != dropped_index
     )
-    
+
     components[dropped_index] = math.sqrt(max(0.0, 1.0 - sum_squares))
-    
+
     x, y, z, w = components
     return x, y, z, w
 
@@ -284,26 +284,33 @@ class ReplayReader:
         self.path = path
         self.header = None
         self.frames = None
-        
+
     def _read_chunk_header(self, br):
-        chunk_type = struct.unpack("<B", br.read(1))[0]
-        index = struct.unpack("<i", br.read(4))[0]
-        chunk_len = struct.unpack("<i", br.read(4))[0]
-        
+        pos = br.tell()
+        data = br.read(9)
+
+        if len(data) != 9:
+            raise Exception(f"EOF reading chunk header at pos {pos}, got {len(data)} bytes")
+
+        chunk_type = data[0]
+        index = struct.unpack("<i", data[1:5])[0]
+        chunk_len = struct.unpack("<i", data[5:9])[0]
+
         return chunk_type, index, chunk_len
-    
+
     def _read_structure_chunk(self, br, chunk_len, base_state: StructureState) -> StructureState:
         chunk_end = br.tell() + chunk_len
         state = copy.deepcopy(base_state)
-        
+
         while br.tell() < chunk_end:
             field_id_raw = struct.unpack("<B", br.read(1))[0]
-            field_size = struct.unpack("<B", br.read(1))[0]
-            
+            field_size = struct.unpack("<H", br.read(2))[0]
+            field_end = br.tell() + field_size
+
             try:
                 field_id = StructureField(field_id_raw)
             except ValueError:
-                br.seek(br.tell() + field_size)
+                br.seek(field_end)
                 continue
 
             if field_id == StructureField.position:
@@ -311,83 +318,85 @@ class ReplayReader:
 
             elif field_id == StructureField.rotation:
                 state.rotation = read_quaternion(br)
-    
+
             elif field_id == StructureField.active:
                 state.active = struct.unpack("<?", br.read(1))[0]
-    
+
             elif field_id == StructureField.grounded:
                 state.grounded = struct.unpack("<?", br.read(1))[0]
-            
+
             elif field_id == StructureField.isLeftHeld:
                 state.isLeftHeld = struct.unpack("<?", br.read(1))[0]
-            
+
             elif field_id == StructureField.isRightHeld:
                 state.isRightHeld = struct.unpack("<?", br.read(1))[0]
-            
+
             elif field_id == StructureField.isFlicked:
                 state.isFlicked = struct.unpack("<?", br.read(1))[0]
-            
+
             elif field_id == StructureField.currentState:
-                value = struct.unpack("<h", br.read(2))[0]
+                value = struct.unpack("<B", br.read(1))[0]
                 state.currentState = StructureStateType(value)
-            
+
             elif field_id == StructureField.isTargetDisk:
                 state.isTargetDisk = struct.unpack("<?", br.read(1))[0]
-            
+
             else:
-                br.seek(br.tell() + field_size)
+                br.seek(field_end)
                 print(f"Chunk: unknown={br.tell()}")
-                
+
+            br.seek(field_end)
+
         return state
-            
+
     def _read_frames(self, br):
         frames = []
-    
+
         frame_index = 0
-        
+
         player_count = len(self.header.Players)
         structure_count = len(self.header.Structures)
         pedestal_count = self.header.PedestalCount
         frame_count = self.header.FrameCount
-        
+
         last_players = [PlayerState() for _ in range(player_count)]
         last_structures = [StructureState() for _ in range(structure_count)]
         last_pedestals = [PedestalState() for _ in range(pedestal_count)]
-        
+
         while True:
             raw = br.read(4)
             if not raw:
                 break
-                
+
             frame_size = struct.unpack("<i", raw)[0]
             frame_end = br.tell() + frame_size
-            
+
             time = struct.unpack("<f", br.read(4))[0]
             entry_count = struct.unpack("<i", br.read(4))[0]
 
             print(f"\nFrame {frame_index}: time={time}, entries={entry_count}, size={frame_size}")
-            
+
             frame_structures = [copy.deepcopy(s) for s in last_structures]
-            
+
             for _ in range(entry_count):
                 chunk_type_raw, index, chunk_len = self._read_chunk_header(br)
                 chunk_type = ChunkType(chunk_type_raw)
-                
+
                 if chunk_type == ChunkType.StructureState:
                     new_state = self._read_structure_chunk(
                         br,
                         chunk_len,
                         last_structures[index]
                     )
-                    
+
                     frame_structures[index] = new_state
                     last_structures[index] = new_state
-                    
+
                 else:
                     br.seek(br.tell() + chunk_len)
-                
+
             br.seek(frame_end)
-            
+
             frames.append(
                 Frame(
                     time = time,
@@ -397,123 +406,139 @@ class ReplayReader:
                     events = []
                 )
             )
-            
+
             frame_index += 1
-            
+
         return frames
-    
+
     def load(self) -> ReplayInfo:
         with zipfile.ZipFile(self.path, "r") as z:
             manifest_json = z.read("manifest.json")
             compressed_replay = z.read("replay")
-            
+
         header_dict = json.loads(manifest_json)
         self.header = ReplayHeader(**header_dict)
-        
+
         replay_bytes = brotli.decompress(compressed_replay)
-        
+
         br = BytesIO(replay_bytes)
-        
+
         magic = br.read(4).decode("ascii")
         if magic != "RPLY":
             raise ValueError(f"Invalid replay file (magic={magic})")
-        
+
         self.frames = self._read_frames(br)
-        
+
         return ReplayInfo(
             header=self.header,
             frames=self.frames
         )
-    
+
 
 class RUMBLE_OT_load_replay(bpy.types.Operator):
     bl_idname = "rumble.load_replay"
     bl_label = "Load Replay"
-    
+
     def execute(self, context):
         path = context.scene.rumble_replay_path
-        
+
         if not path:
             self.report({'ERROR'}, "No file selected")
             return {'CANCELLED'}
-        
+
         print("Loading replay:", path)
-        
+
         try:
             reader = ReplayReader(path)
             replay = reader.load()
-            
+
             name = "ReplayRoot"
-            
+
             if name in bpy.data.collections:
                 col = bpy.data.collections[name]
-                
+
                 for obj in list(col.objects):
                     bpy.data.objects.remove(obj, do_unlink=True)
             else:
                 col = bpy.data.collections.new(name)
                 bpy.context.scene.collection.children.link(col)
-                
+
             bpy.ops.object.empty_add(type='PLAIN_AXES')
             root = bpy.context.active_object
             root.name = "ReplayRoot"
-            
+
             for c in root.users_collection:
                 c.objects.unlink(root)
             col.objects.link(root)
-            
+
             root.scale = (-1, 1, 1)
             root.rotation_euler = (math.radians(90), 0, 0)
-            
+
+            bpy.ops.object.empty_add(type='PLAIN_AXES')
+            structureRoot = bpy.context.active_object
+            structureRoot.name = "Structures"
+            structureRoot.parent = root
+
             structure_count = len(replay.header.Structures)
-            
+
             objects = []
-            
+
             for i in range(structure_count):
                 structure_info = replay.header.Structures[i]
                 structure_type = StructureType(structure_info["Type"])
-                
+
                 template_name = structure_type.name
                 template = bpy.data.objects.get(template_name)
-                
+
                 if template is None:
                     raise Exception(f"Missing template mesh: {template_name}")
-                
+
                 obj = template.copy()
                 obj.data = template.data.copy()
                 obj.rotation_mode = 'QUATERNION'
                 obj.name = f"Structure{i}"
-                
+
                 for c in obj.users_collection:
                     c.objects.unlink(obj)
                 col.objects.link(obj)
-                
-                obj.parent = root
-                
+
+                obj.parent = structureRoot
+
                 objects.append(obj)
-                
-            self.report({'INFO'}, f"Created {structure_count} cubes")
-            
+
+            self.report({'INFO'}, f"Created {structure_count} structure(s)")
+
+            bpy.ops.object.empty_add(type='PLAIN_AXES')
+            playersRoot = bpy.context.active_object
+            playersRoot.name = "Players"
+            playersRoot.parent = root
+
+            player_count = len(replay.header.Players)
+
+            players = []
+
+            self.report({'INFO'}, f"Loaded {player_count} player(s)")
+
             scene = bpy.context.scene
             scene.frame_start = 1
             scene.frame_end = len(replay.frames)
-            
+
             fps = replay.header.TargetFPS
             scene.render.fps = fps
-            
+
             for frame in replay.frames:
                 blender_frame = round(frame.time * fps) + 1
                 scene.frame_set(blender_frame)
-                
+
                 for i, state in enumerate(frame.structures):
                     obj = objects[i]
-                    
+
                     obj.location = (
                         state.position[0],
                         state.position[1],
                         state.position[2]
                     )
-                    
+
                     x, y, z, w = state.rotation
                     obj.rotation_quaternion = (
                         w,
@@ -521,49 +546,49 @@ class RUMBLE_OT_load_replay(bpy.types.Operator):
                         y,
                         z
                     )
-                    
+
                     obj.hide_viewport = not state.active
                     obj.hide_render = not state.active
-                    
+
                     obj.keyframe_insert(data_path="location")
                     obj.keyframe_insert(data_path="rotation_quaternion")
                     obj.keyframe_insert(data_path="hide_viewport")
                     obj.keyframe_insert(data_path="hide_render")
-            
+
         except Exception as e:
             self.report({'ERROR'}, f"Failed to load replay: {e}")
             return {'CANCELLED'}
-        
+
         self.report({'INFO'}, "Successfully loaded replay")
         return {'FINISHED'}
-    
+
 class RUMBLE_PT_panel(bpy.types.Panel):
     bl_label = "Replay Mod"
     bl_idname = "RUMBLE_PT_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "Rumble"
-    
+
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        
+
         layout.prop(scene, "rumble_replay_path")
         layout.operator("rumble.load_replay")
-        
+
 def register():
     bpy.utils.register_class(RUMBLE_OT_load_replay)
     bpy.utils.register_class(RUMBLE_PT_panel)
-    
+
     bpy.types.Scene.rumble_replay_path = bpy.props.StringProperty(
         name="Replay File",
         subtype='FILE_PATH'
     )
-    
+
 def unregister():
     bpy.utils.unregister_class(RUMBLE_OT_load_replay)
     bpy.utils.unregister_class(RUMBLE_PT_panel)
-    
+
     del bpy.types.Scene.rumble_replay_path
 
 if __name__ == "__main__":

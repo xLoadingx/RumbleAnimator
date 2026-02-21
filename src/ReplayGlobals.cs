@@ -919,7 +919,7 @@ public class ReplayExplorer
             SortingType.DateNewestFirst => files.OrderBy(f => File.GetLastWriteTimeUtc(f.FullPath)).ToList(),
             SortingType.DateOldestFirst => files.OrderByDescending(f => File.GetLastWriteTimeUtc(f.FullPath)).ToList(),
 
-            SortingType.DurationLongestFirst => files.OrderByDescending(f => f.header.Duration).ToList(),
+            SortingType.DurationLongestFirst => files.OrderBy(f => f.header.Duration).ToList(),
             SortingType.DurationShortestFirst => files.OrderByDescending(f => f.header.Duration).ToList(),
 
             SortingType.MapAscending => files.OrderBy(f => ReplaySerializer.GetMapName(header: f.header), StringComparer.OrdinalIgnoreCase).ToList(),
@@ -1139,6 +1139,7 @@ public class ReplaySettings : MonoBehaviour
     public static bool selectionInProgress;
     public static Player selectedPlayer;
     public static Dictionary<int, List<(UserData, Player)>> playerList = new();
+    public static List<PlayerTag> playerTags = new();
     public static int currentPlayerPage = 0;
 
     public static GameObject slideOutPanel;
@@ -1408,19 +1409,18 @@ public class ReplaySettings : MonoBehaviour
         pageNumberText.text = $"{currentPlayerPage + (playerList.Count == 0 ? 0 : 1)} / {playerList.Count}";
         pageNumberText.ForceMeshUpdate();
 
-        var slabs = slideOutPanel.GetComponentsInChildren<PlayerTag>(true);
         var usersOnPage = playerList.TryGetValue(currentPlayerPage, out var value) ? value : new List<(UserData, Player)>();
 
-        for (int i = 0; i < slabs.Length; i++)
+        for (int i = 0; i < playerTags.Count; i++)
         {
             if (i < usersOnPage.Count)
             {
-                slabs[i].gameObject.SetActive(true);
-                slabs[i].Initialize(usersOnPage[i].Item1);
+                playerTags[i].gameObject.SetActive(true);
+                playerTags[i].Initialize(usersOnPage[i].Item1);
             }
             else
             {
-                slabs[i].gameObject.SetActive(false);
+                playerTags[i].gameObject.SetActive(false);
             }
         }
     }

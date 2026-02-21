@@ -125,23 +125,32 @@ public class Patches
                 }
             }
 
-            if (Main.playbackSpeed != 0f)
+            if (Main.playbackSpeed != 0f && Main.isPlaying)
             {
+                float minDistance = 999999f;
+                
                 if (name is "Jump_VFX" or "Dash_VFX" && Main.instance.PlaybackPlayers?.Length > 0)
                 {
-                    float minDistance = Main.instance.PlaybackPlayers
+                    minDistance = Main.instance.PlaybackPlayers
                         .Select(player => Vector3.Distance(player.Controller.transform.GetChild(1).GetChild(2).position, vfx.transform.position))
-                        .DefaultIfEmpty(999f)
                         .Min();
-            
-                    if (minDistance < 0.2f)
-                    {
-                        vfx.playRate = Abs(Main.playbackSpeed); 
-                        GameObject.Destroy(vfx.GetComponent<PooledVisualEffect>()); 
-                        vfx.transform.SetParent(Main.instance.VFXParent.transform); 
-                        vfx.gameObject.AddComponent<DeleteAfterSeconds>(); 
-                        return;
-                    }
+                }
+
+                if (name is "Unground_VFX" or "Ground_VFX" && Main.instance.PlaybackStructures?.Length > 0)
+                {
+                    minDistance = Main.instance.PlaybackStructures
+                        .Select(structure => Vector3.Distance(structure.transform.position, vfx.transform.position))
+                        .Min();
+                }
+                
+                if (minDistance < 1f * Main.instance.ReplayRoot?.transform?.localScale.magnitude)
+                {
+                    vfx.playRate = Abs(Main.playbackSpeed); 
+                    GameObject.Destroy(vfx.GetComponent<PooledVisualEffect>()); 
+                    vfx.transform.SetParent(Main.instance.VFXParent.transform);
+                    vfx.transform.localScale = Vector3.Scale(vfx.transform.localScale, Main.instance.ReplayRoot.transform.localScale);
+                    vfx.gameObject.AddComponent<DeleteAfterSeconds>(); 
+                    return;
                 }
                 
                 vfx.playRate = 1f;

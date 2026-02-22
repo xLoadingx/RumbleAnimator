@@ -10,20 +10,18 @@ using Il2CppRUMBLE.Input;
 using Il2CppRUMBLE.Managers;
 using Il2CppRUMBLE.MoveSystem;
 using Il2CppRUMBLE.Players;
-using Il2CppRUMBLE.Players.Scaling;
 using Il2CppRUMBLE.Players.Subsystems;
 using Il2CppRUMBLE.Pools;
-using Il2CppSystem.Reflection;
 using MelonLoader;
+using ReplayMod.Replay;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.VFX;
 using static UnityEngine.Mathf;
-using MethodBase = System.Reflection.MethodBase;
 using SceneManager = Il2CppRUMBLE.Managers.SceneManager;
 using Stack = Il2CppRUMBLE.MoveSystem.Stack;
 
-namespace ReplayMod;
+namespace ReplayMod.Core;
 
 public class Patches
 {
@@ -32,7 +30,7 @@ public class Patches
     public static Dictionary<string, Queue<(float time, int damage)>> damageQueues = new();
     public static Dictionary<string, float> lastLargeDamageTime = new();
     
-    public static int GetPlayerIndex(Player player) => Main.instance.RecordedPlayers.IndexOf(player);
+    public static int GetPlayerIndex(Player player) => Main.Recording.RecordedPlayers.IndexOf(player);
     
     // ----- Pools -----
     [HarmonyPatch(typeof(PoolManager), nameof(PoolManager.Instantiate))]
@@ -40,11 +38,11 @@ public class Patches
     {
         static void Postfix(GameObject __result)
         {
-            if (!Main.isRecording && !Main.isBuffering)
+            if (!Main.Recording.isRecording && !Main.Recording.isBuffering)
                 return;
 
             var structure = __result.GetComponent<Structure>();
-            Main.instance.TryRegisterStructure(structure);
+            Main.Recording.TryRegisterStructure(structure);
         }
     }
 
@@ -70,7 +68,7 @@ public class Patches
 
             if (type.HasValue)
             {
-                Main.instance.Events.Add(new EventChunk
+                Main.Recording.Events.Add(new EventChunk
                 {
                     type = EventType.OneShotFX,
                     fxType = type.Value,
@@ -101,13 +99,16 @@ public class Patches
     {
         static void Postfix(PooledMonoBehaviour __result, Vector3 position, Quaternion rotation)
         {
+            if (Main.currentScene == "Loader")
+                return;
+            
             var vfx = __result.GetComponent<VisualEffect>(); 
             if (vfx == null) 
                 return; 
             
             string name = vfx.name;
 
-            if (Main.isRecording || Main.isBuffering)
+            if (Main.Recording.isRecording || Main.Recording.isBuffering)
             {
                 FXOneShotType? type = ReplayCache.VFXNameToFX.TryGetValue(name, out var foundType) ? foundType : null;
 
@@ -121,34 +122,34 @@ public class Patches
                     }; 
                     
                     if (type is FXOneShotType.Ricochet) 
-                        evt.rotation = rotation; Main.instance.Events.Add(evt);
+                        evt.rotation = rotation; Main.Recording.Events.Add(evt);
                 }
             }
 
-            if (Main.playbackSpeed != 0f && Main.isPlaying)
+            if (Main.Playback.playbackSpeed != 0f && Main.Playback.isPlaying)
             {
                 float minDistance = 999999f;
                 
-                if (name is "Jump_VFX" or "Dash_VFX" && Main.instance.PlaybackPlayers?.Length > 0)
+                if (name is "Jump_VFX" or "Dash_VFX" && Main.Playback.PlaybackPlayers?.Length > 0)
                 {
-                    minDistance = Main.instance.PlaybackPlayers
+                    minDistance = Main.Playback.PlaybackPlayers
                         .Select(player => Vector3.Distance(player.Controller.transform.GetChild(1).GetChild(2).position, vfx.transform.position))
                         .Min();
                 }
 
-                if (name is "Unground_VFX" or "Ground_VFX" && Main.instance.PlaybackStructures?.Length > 0)
+                if (name is "Unground_VFX" or "Ground_VFX" && Main.Playback.PlaybackStructures?.Length > 0)
                 {
-                    minDistance = Main.instance.PlaybackStructures
+                    minDistance = Main.Playback.PlaybackStructures
                         .Select(structure => Vector3.Distance(structure.transform.position, vfx.transform.position))
                         .Min();
                 }
                 
-                if (minDistance < 1f * Main.instance.ReplayRoot?.transform?.localScale.magnitude)
+                if (minDistance < 1f * Main.Playback.ReplayRoot?.transform?.localScale.magnitude)
                 {
-                    vfx.playRate = Abs(Main.playbackSpeed); 
+                    vfx.playRate = Abs(Main.Playback.playbackSpeed); 
                     GameObject.Destroy(vfx.GetComponent<PooledVisualEffect>()); 
-                    vfx.transform.SetParent(Main.instance.VFXParent.transform);
-                    vfx.transform.localScale = Vector3.Scale(vfx.transform.localScale, Main.instance.ReplayRoot.transform.localScale);
+                    vfx.transform.SetParent(Main.Playback.VFXParent.transform);
+                    vfx.transform.localScale = Vector3.Scale(vfx.transform.localScale, Main.Playback.ReplayRoot.transform.localScale);
                     vfx.gameObject.AddComponent<DeleteAfterSeconds>(); 
                     return;
                 }
@@ -165,7 +166,7 @@ public class Patches
     {
         static void Postfix(PlayerHealth __instance, short amount)
         {
-            if (!Main.isRecording && !Main.isBuffering)
+            if (!Main.Recording.isRecording && !Main.Recording.isBuffering)
                 return;
             
             if (!(bool)Main.instance.EnableLargeDamageMarker.SavedValue)
@@ -179,7 +180,7 @@ public class Patches
                 damageQueues[playerId] = queue;
             }
 
-            float time = Main.lastSampleTime;
+            float time = Main.Recording.lastSampleTime;
             queue.Enqueue((time, amount));
 
             while (queue.Count > 0 && queue.Peek().time < time - (float)Main.instance.DamageWindow.SavedValue)
@@ -197,7 +198,7 @@ public class Patches
                 lastLargeDamageTime[playerId] = time;
                 queue.Clear();
 
-                Main.instance.AddMarker("core.largeDamage", Color.red);
+                Main.Recording.AddMarker("core.largeDamage", Color.red);
             }
         }
     }
@@ -207,7 +208,7 @@ public class Patches
     {
         static void Postfix(PlayerHealth __instance, short damage, Vector3 position)
         {
-            Main.instance.Events.Add(new EventChunk
+            Main.Recording.Events.Add(new EventChunk
             {
                 damage = damage,
                 position = position,
@@ -223,13 +224,13 @@ public class Patches
     {
         static void Postfix(PlayerVisuals __instance)
         {
-            if (!Main.isRecording && !Main.isBuffering)
+            if (!Main.Recording.isRecording && !Main.Recording.isBuffering)
                 return;
 
             var player = __instance.ParentController.assignedPlayer;
             if (player == null) return;
             
-            Main.instance.RecordedPlayers.Add(player);
+            Main.Recording.RecordedPlayers.Add(player);
 
             MelonCoroutines.Start(VisualDataDelay(player));
         }
@@ -242,7 +243,7 @@ public class Patches
                 yield break;
 
             var id = player.Data.GeneralData.PlayFabMasterId;
-            Main.instance.PlayerInfos[id] = new PlayerInfo(player);
+            Main.Recording.PlayerInfos[id] = new PlayerInfo(player);
         }
     }
 
@@ -251,7 +252,7 @@ public class Patches
     {
         static void Prefix(PlayerController __instance)
         {
-            if (!Main.isRecording && !Main.isBuffering)
+            if (!Main.Recording.isRecording && !Main.Recording.isBuffering)
                 return;
 
             string id = __instance?.assignedPlayer?.Data?.GeneralData?.PlayFabMasterId;
@@ -259,7 +260,7 @@ public class Patches
             if (string.IsNullOrEmpty(id))
                 return;
 
-            Main.instance.PlayerInfos[id] = null;
+            Main.Recording.PlayerInfos[id] = null;
         }
     }
     
@@ -270,7 +271,7 @@ public class Patches
     {
         static void Postfix(Stack stack, PlayerStackProcessor __instance)
         {
-            if (!Main.isRecording && !Main.isBuffering)
+            if (!Main.Recording.isRecording && !Main.Recording.isBuffering)
                 return;
 
             if (ReplayCache.NameToStackType.TryGetValue(stack.cachedName, out var type))
@@ -284,7 +285,7 @@ public class Patches
     [HarmonyPatch(new[] { typeof(int), typeof(bool), typeof(bool), typeof(float), typeof(LoadSceneMode), typeof(AudioCall) })]
     public class Patch_SceneManager_LoadSceneAsync
     {
-        static void Prefix() => Main.instance.StopReplay();
+        static void Prefix() => Main.Playback.StopReplay();
     }
 
     [HarmonyPatch(typeof(ParkBoardTrigger), nameof(ParkBoardTrigger.OnTriggerEnter))]
@@ -293,7 +294,7 @@ public class Patches
         static void Postfix(Collider other)
         {
             // In a replay park
-            if (PhotonNetwork.CurrentRoom == null && Main.instance.currentScene == "Park")
+            if (PhotonNetwork.CurrentRoom == null && Main.currentScene == "Park")
                 MelonCoroutines.Start(Utilities.LoadMap(1));
         }
     }
@@ -303,11 +304,11 @@ public class Patches
     {
         static void Prefix(PlayerHandPresence __instance, InputManager.Hand hand, ref PlayerHandPresence.HandPresenceInput input)
         {
-            if (!Main.isPlaying || !Utilities.IsReplayClone(__instance.parentController) || Main.instance.PlaybackPlayers == null)
+            if (!Main.Playback.isPlaying || !Utilities.IsReplayClone(__instance.parentController) || Main.Playback.PlaybackPlayers == null)
                 return;
 
-            Clone playbackPlayer = null;
-            foreach (var player in Main.instance.PlaybackPlayers)
+            ReplayPlayback.Clone playbackPlayer = null;
+            foreach (var player in Main.Playback.PlaybackPlayers)
             {
                 if (player == null)
                     continue;
@@ -333,7 +334,7 @@ public class Patches
     {
         static bool Prefix(PlayerHealth __instance)
         {
-            if (!Main.isPlaying || !Utilities.IsReplayClone(__instance.parentController))
+            if (!Main.Playback.isPlaying || !Utilities.IsReplayClone(__instance.parentController))
                 return true;
 
             return false;

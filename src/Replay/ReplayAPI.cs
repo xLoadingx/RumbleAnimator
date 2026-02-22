@@ -3,13 +3,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
-using RumbleModUI;
+using ReplayMod.Core;
+using ReplayMod.Replay.Files;
+using ReplayMod.Replay.UI;
 using RumbleModUIPlus;
 using UnityEngine;
+using BuildInfo = ReplayMod.Core.BuildInfo;
 using CompressionLevel = System.IO.Compression.CompressionLevel;
 using Tags = RumbleModUIPlus.Tags;
 
-namespace ReplayMod;
+namespace ReplayMod.Replay;
 
 public static class ReplayAPI
 {
@@ -86,33 +89,33 @@ public static class ReplayAPI
     /// Gets whether a recording is currently active.
     /// This is enabled when a user manually starts recording.
     /// </summary>
-    public static bool IsRecording => Main.isRecording;
+    public static bool IsRecording => Main.Recording.isRecording;
     
     /// <summary>
     /// Gets whether the buffer is currently recording frames.
     /// Separate from manual recording.
     /// </summary>
-    public static bool IsBuffering => Main.isBuffering;
+    public static bool IsBuffering => Main.Recording.isBuffering;
     
     /// <summary>
     /// Gets whether playback is currently active.
     /// </summary>
-    public static bool IsPlaying => Main.isPlaying;
+    public static bool IsPlaying => Main.Playback.isPlaying;
     
     /// <summary>
     /// Gets whether playback is currently paused.
     /// </summary>
-    public static bool IsPaused => Main.isPaused;
+    public static bool IsPaused => Main.Playback.isPaused;
     
     /// <summary>
     /// The elapsed time (in seconds) of playback.
     /// </summary>
-    public static float CurrentTime => Main.elapsedPlaybackTime;
+    public static float CurrentTime => Main.Playback.elapsedPlaybackTime;
     
     /// <summary>
     /// The total duration of playback.
     /// </summary>
-    public static float Duration => Main.currentReplay?.Header?.Duration ?? 0f;
+    public static float Duration => Main.Playback.currentReplay?.Header?.Duration ?? 0f;
 
     /// <summary>
     /// Returns the current format version that replays are written in.
@@ -122,17 +125,17 @@ public static class ReplayAPI
     /// <summary>
     /// Gets the list of all player clones in the active playback.
     /// </summary>
-    public static IReadOnlyList<Clone> Players => Main.instance.PlaybackPlayers;
+    public static IReadOnlyList<ReplayPlayback.Clone> Players => Main.Playback.PlaybackPlayers;
     
     /// <summary>
     /// Gets the list of all playback structures in the active playback.
     /// </summary>
-    public static IReadOnlyList<GameObject> Structures => Main.instance.PlaybackStructures;
+    public static IReadOnlyList<GameObject> Structures => Main.Playback.PlaybackStructures;
     
     /// <summary>
     /// Gets the currently loaded replay, if any.
     /// </summary>
-    public static ReplayInfo CurrentReplay => Main.currentReplay;
+    public static ReplayInfo CurrentReplay => Main.Playback.currentReplay;
 
     /// <summary>
     /// Gets the template for the input scene's metadata
@@ -147,7 +150,7 @@ public static class ReplayAPI
     /// <param name="replayInfo">The info to fill in the template with</param>
     /// <returns>Formatted string for the input replay</returns>
     public static string FormatReplayTemplate(string template, ReplaySerializer.ReplayHeader replayInfo) => 
-        ReplaySerializer.FormatReplayString(template, replayInfo);
+        ReplayFormatting.FormatReplayString(template, replayInfo);
 
     /// <summary>
     /// Gets the displayed name for a replay (as shown on the Replay Table) using the provided path and info.
@@ -158,14 +161,14 @@ public static class ReplayAPI
     /// <param name="displayTitle">Whether to show the title if the file name starts with 'Replay'</param>
     /// <returns></returns>
     public static string GetReplayDisplayName(string replayPath, ReplaySerializer.ReplayHeader replayInfo, string alternativeName = null, bool displayTitle = true) =>
-        ReplaySerializer.GetReplayDisplayName(replayPath, replayInfo, alternativeName, displayTitle);
+        ReplayFormatting.GetReplayDisplayName(replayPath, replayInfo, alternativeName, displayTitle);
     
     /// <summary>
     /// Loads and begins playback of the replay at the specified file path.
     /// This does not change scenes.
     /// </summary>
     /// <param name="path">The path to the replay</param>
-    public static void Play(string path) => Main.instance.LoadReplay(path);
+    public static void Play(string path) => Main.Playback.LoadReplay(path);
 
     /// <summary>
     /// Loads and begins playback of the currently selected replay on the Replay Table.
@@ -178,51 +181,51 @@ public static class ReplayAPI
     /// <summary>
     /// Stops and gets rid of the current replay and its objects.
     /// </summary>
-    public static void Stop() => Main.instance.StopReplay();
+    public static void Stop() => Main.Playback.StopReplay();
 
     /// <summary>
     /// Starts a new manual recording session.
     /// </summary>
-    public static void StartRecording() => Main.instance.StartRecording();
+    public static void StartRecording() => Main.Recording.StartRecording();
     
     /// <summary>
     /// Stops and saves the current recording session to a replay.
     /// </summary>
-    public static void StopRecording() => Main.instance.StopRecording();
+    public static void StopRecording() => Main.Recording.StopRecording();
 
     /// <summary>
     /// Starts buffering with the user-specified buffer length.
     /// </summary>
-    public static void StartBuffering() => Main.instance.StartBuffering();
+    public static void StartBuffering() => Main.Recording.StartBuffering();
     
     /// <summary>
-    /// Saves the current buffer to a replay.
+    /// Saves the current buffer to a replay file.
     /// </summary>
-    public static void SaveBuffer() => Main.instance.SaveReplayBuffer();
+    public static void SaveBuffer() => Main.Recording.SaveReplayBuffer();
     
     /// <summary>
     /// Pauses or resumes playback.
     /// </summary>
     /// <param name="playing">Whether the playback is playing or not</param>
-    public static void TogglePlayback(bool playing) => Main.instance.TogglePlayback(playing);
+    public static void TogglePlayback(bool playing) => Main.Playback.TogglePlayback(playing);
     
     /// <summary>
     /// Seeks playback to the specified time in seconds.
     /// </summary>
     /// <param name="time">Target time (in seconds)</param>
-    public static void Seek(float time) => Main.instance.SetPlaybackTime(time);
+    public static void Seek(float time) => Main.Playback.SetPlaybackTime(time);
     
     /// <summary>
     /// Seeks playback to the specified frame index.
     /// </summary>
     /// <param name="frame">Target frame index</param>
-    public static void Seek(int frame) => Main.instance.SetPlaybackFrame(frame);
+    public static void Seek(int frame) => Main.Playback.SetPlaybackFrame(frame);
     
     /// <summary>
     /// Sets the playback speed multiplier.
     /// </summary>
     /// <param name="speed">Target speed</param>
-    public static void SetSpeed(float speed) => Main.instance.SetPlaybackSpeed(speed);
+    public static void SetSpeed(float speed) => Main.Playback.SetPlaybackSpeed(speed);
 
     private static readonly Dictionary<int, Action<BinaryReader, Frame>> _frameReaders = new();
     private static readonly Dictionary<int, Action<FrameExtensionWriter, Frame>> _frameWriters = new();
@@ -398,7 +401,7 @@ public static class ReplayAPI
         /// <param name="color">The color in which the marker appears on the timeline.</param>
         /// <returns>The added marker</returns>
         public Marker AddMarker(string name, float time, Color color) =>
-            Main.instance.AddMarker($"{_modId}.{name}", color, time);
+            Main.Recording.AddMarker($"{_modId}.{name}", color, time);
     }
 
     /// <summary>

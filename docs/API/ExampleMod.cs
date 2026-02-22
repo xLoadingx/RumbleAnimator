@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using MelonLoader;
 using ReplayMod;
+using ReplayMod.Replay;
 using RumbleModdingAPI;
 using UnityEngine;
 
